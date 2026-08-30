@@ -32,10 +32,15 @@ if (TOKEN_RO && TOKEN_RO === TOKEN) {
 }
 
 let REGISTRY;
+let CONFIG_ERROR = null;
 try {
   REGISTRY = loadRegistry();
 } catch (e) {
-  fatal(e.message);
+  // Do NOT exit. A dead domain tells you nothing; a running gateway that reports
+  // exactly which env var is missing tells you everything. Tool calls are refused
+  // until this is fixed.
+  CONFIG_ERROR = e.message;
+  REGISTRY = { sites: {}, skipped: [], file: 'not loaded' };
 }
 
 // ---------------------------------------------------------------- audit log
@@ -172,6 +177,14 @@ function resolveSite(key) {
 
 async function callTool(name, args, ctx) {
   args = args || {};
+
+  if (CONFIG_ERROR) {
+    audit({ event: 'deny', tool: name, caller: ctx.scope, reason: 'gateway not configured' });
+    return refuse(
+      `The WordPress gateway is running but has no site registry loaded, so no site can be ` +
+      `reached yet. Tell Alex: "${CONFIG_ERROR}"`
+    );
+  }
 
   if (name === 'wp_list_sites') {
     const list = Object.values(REGISTRY.sites).map((s) => ({
@@ -325,20 +338,38 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   if (url.pathname === '/healthz' || url.pathname === '/health') {
+    if (CONFIG_ERROR) return json(res, 503, { ok: false, sites: 0, problem: CONFIG_ERROR });
     return json(res, 200, { ok: true, sites: Object.keys(REGISTRY.sites).length });
   }
 
-  // Proof of life you can check in a browser. If you see this, the process is
-  // running and the config loaded; anything still broken is ClickUp-side.
+  // Proof of life you can check in a browser, and a checklist when it is unhappy.
   if (url.pathname === '/' || url.pathname === '/index.html') {
-    const body =
-      `Indak WP Gateway is running.\n\n` +
-      `MCP endpoint : POST ${MCP_PATH}  (needs Authorization: Bearer <GATEWAY_TOKEN>)\n` +
-      `Health       : GET /healthz\n` +
-      `Sites loaded : ${Object.keys(REGISTRY.sites).length}` +
-      (REGISTRY.skipped.length ? `\nSites skipped: ${REGISTRY.skipped.length} (see the boot log for why)` : '') +
-      `\n\nThis page is public on purpose and lists no site names, URLs or secrets.\n`;
-    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    let body;
+    if (CONFIG_ERROR) {
+      body =
+        `Indak WP Gateway is RUNNING but NOT CONFIGURED.\n\n` +
+        `Problem: ${CONFIG_ERROR}\n\n` +
+        `Fix it by adding this environment variable on your host, then redeploy:\n\n` +
+        `  REGISTRY_JSON = {"mysticon":{"label":"Mysticon","base":"https://example.com",\n` +
+        `                   "env":"live","user":"novamira-bot",\n` +
+        `                   "appPasswordEnv":"WP_PW_MYSTICON","writes":false}}\n\n` +
+        `...on one line, plus WP_PW_MYSTICON set to that site's WordPress\n` +
+        `application password for the novamira-bot user.\n\n` +
+        `Every ability call is refused until the registry loads.\n`;
+    } else {
+      const skipped = REGISTRY.skipped.length;
+      body =
+        `Indak WP Gateway is running.\n\n` +
+        `MCP endpoint : POST ${MCP_PATH}  (needs Authorization: Bearer <GATEWAY_TOKEN>)\n` +
+        `Health       : GET /healthz\n` +
+        `Sites loaded : ${Object.keys(REGISTRY.sites).length}\n` +
+        (skipped
+          ? `Sites skipped: ${skipped}\n` +
+            REGISTRY.skipped.map((x) => `  - ${x.key}: ${x.why}\n`).join('')
+          : '') +
+        `\nThis page is public on purpose and lists no site names, URLs or secrets.\n`;
+    }
+    res.writeHead(CONFIG_ERROR ? 503 : 200, { 'content-type': 'text/plain; charset=utf-8' });
     return res.end(body);
   }
 
@@ -395,13 +426,19 @@ server.listen(PORT, HOST, () => {
     endpoint: `${MCP_PATH}`,
     port: PORT,
     registry: REGISTRY.file,
+    config_error: CONFIG_ERROR,
     sites: Object.values(REGISTRY.sites).map((s) => `${s.key} (${s.env}, writes=${s.writes})`),
     skipped: REGISTRY.skipped,
     allow_live_root: ALLOW_LIVE_ROOT,
     readonly_token: Boolean(TOKEN_RO),
   });
-  if (!Object.keys(REGISTRY.sites).length) {
-    console.error('WARNING: no usable sites in the registry. Every tool call will fail.');
+  if (CONFIG_ERROR) {
+    console.error('\n=== GATEWAY IS RUNNING BUT NOT CONFIGURED ===');
+    console.error(CONFIG_ERROR);
+    console.error('Open the domain root in a browser for the fix. Tool calls are refused until then.');
+    console.error('============================================\n');
+  } else if (!Object.keys(REGISTRY.sites).length) {
+    console.error('WARNING: the registry loaded but contains no usable sites. Every tool call will fail.');
   }
   if (ALLOW_LIVE_ROOT) {
     console.error('WARNING: ALLOW_LIVE_ROOT=true. PHP execution and file writes are permitted on LIVE client sites.');

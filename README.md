@@ -138,10 +138,11 @@ there. If you get that, the process is alive and any remaining problem is ClickU
 If the root gives you nothing, a Hostinger placeholder, or a 503, check **Runtime Logs**
 (not the build log) in that order:
 
-1. **`=== GATEWAY DID NOT START ===`** in the log. The gateway refuses to boot without
-   `GATEWAY_TOKEN` and a registry, on purpose, and the message names the missing piece.
-   This is the most common cause: env vars were never set, so the build went green and the
-   process died on first start.
+1. **`=== GATEWAY DID NOT START ===`** in the log. The only fatal misconfiguration is a
+   missing or too-short `GATEWAY_TOKEN`, because serving an unauthenticated gateway would
+   be worse than serving nothing. The message names the problem.
+   A **missing registry is not fatal**: the gateway boots anyway and the domain root tells
+   you which env var to add. If you get that page, the hosting is fine and it is just config.
 2. **Entry file** must be `src/server.js`. If it is blank or wrong, nothing ever launches.
 3. **`PORT` must not be set by you.** Hostinger assigns it. If you set it, Hostinger cannot
    route to the app and you get a 503 forever.
