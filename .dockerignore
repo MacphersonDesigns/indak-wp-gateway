@@ -1,0 +1,5 @@
+.env
+registry.json
+node_modules
+.git
+*.log

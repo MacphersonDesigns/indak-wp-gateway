@@ -1,0 +1,42 @@
+{
+  "indak": {
+    "label": "Indak Media",
+    "base": "https://indakmedia.com",
+    "env": "live",
+    "user": "novamira-bot",
+    "appPasswordEnv": "WP_PW_INDAK",
+    "writes": false,
+    "rateLimitPerMin": 30
+  },
+  "strengthennd": {
+    "label": "Strengthen ND (staging)",
+    "base": "https://staging.strengthennd.org",
+    "env": "staging",
+    "user": "novamira-bot",
+    "appPasswordEnv": "WP_PW_STRENGTHENND",
+    "writes": false,
+    "rateLimitPerMin": 30
+  },
+
+  "mysticon": {
+    "label": "Mysticon",
+    "base": "https://mysticonnd.com",
+    "env": "live",
+    "user": "novamira-bot",
+    "appPasswordEnv": "WP_PW_MYSTICON",
+    "writes": false,
+    "disabled": true
+  },
+
+  "_template": {
+    "label": "Client Name (staging)",
+    "base": "https://staging.example.com",
+    "env": "staging",
+    "user": "novamira-bot",
+    "appPasswordEnv": "WP_PW_CLIENTKEY",
+    "writes": false,
+    "rateLimitPerMin": 30,
+    "mcpPath": "/wp-json/mcp-adapter/mcp",
+    "disabled": true
+  }
+}

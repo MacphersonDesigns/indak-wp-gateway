@@ -1,0 +1,23 @@
+# fly launch --ha=false --smoke-checks=false   (then: fly secrets set GATEWAY_TOKEN=...)
+app = "indak-wp-gateway"
+primary_region = "ord"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[env]
+  PORT = "8080"

@@ -1,0 +1,4 @@
+.env
+registry.json
+node_modules
+*.log
