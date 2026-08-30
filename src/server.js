@@ -14,25 +14,28 @@ const ALLOW_LIVE_ROOT = process.env.ALLOW_LIVE_ROOT === 'true';
 
 const TOKEN = process.env.GATEWAY_TOKEN || '';
 const TOKEN_RO = process.env.GATEWAY_TOKEN_READONLY || '';
-if (!TOKEN) {
-  console.error('GATEWAY_TOKEN is required. Generate one with: openssl rand -hex 32');
+function fatal(msg) {
+  console.error('\n=== GATEWAY DID NOT START ===');
+  console.error(msg);
+  console.error('=============================\n');
   process.exit(1);
+}
+
+if (!TOKEN) {
+  fatal('GATEWAY_TOKEN env var is not set.\nGenerate one with: openssl rand -hex 32\nThen set it as an environment variable on your host and redeploy.');
 }
 if (TOKEN.length < 32) {
-  console.error('GATEWAY_TOKEN is too short. Use at least 32 chars: openssl rand -hex 32');
-  process.exit(1);
+  fatal(`GATEWAY_TOKEN is only ${TOKEN.length} characters. Use at least 32: openssl rand -hex 32`);
 }
 if (TOKEN_RO && TOKEN_RO === TOKEN) {
-  console.error('GATEWAY_TOKEN_READONLY must differ from GATEWAY_TOKEN.');
-  process.exit(1);
+  fatal('GATEWAY_TOKEN_READONLY must be a different value from GATEWAY_TOKEN.');
 }
 
 let REGISTRY;
 try {
   REGISTRY = loadRegistry();
 } catch (e) {
-  console.error(e.message);
-  process.exit(1);
+  fatal(e.message);
 }
 
 // ---------------------------------------------------------------- audit log
@@ -323,6 +326,20 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === '/healthz' || url.pathname === '/health') {
     return json(res, 200, { ok: true, sites: Object.keys(REGISTRY.sites).length });
+  }
+
+  // Proof of life you can check in a browser. If you see this, the process is
+  // running and the config loaded; anything still broken is ClickUp-side.
+  if (url.pathname === '/' || url.pathname === '/index.html') {
+    const body =
+      `Indak WP Gateway is running.\n\n` +
+      `MCP endpoint : POST ${MCP_PATH}  (needs Authorization: Bearer <GATEWAY_TOKEN>)\n` +
+      `Health       : GET /healthz\n` +
+      `Sites loaded : ${Object.keys(REGISTRY.sites).length}` +
+      (REGISTRY.skipped.length ? `\nSites skipped: ${REGISTRY.skipped.length} (see the boot log for why)` : '') +
+      `\n\nThis page is public on purpose and lists no site names, URLs or secrets.\n`;
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+    return res.end(body);
   }
 
   if (url.pathname !== MCP_PATH) {

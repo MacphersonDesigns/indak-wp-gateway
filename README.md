@@ -28,8 +28,9 @@ Four tools, permanently, no matter how many sites you add.
 Novamira can execute PHP and write files, so a gateway fronting a dozen client sites is
 effectively root on all of them, reachable by everyone holding the token. Four layers:
 
-1. **Per-site `writes` flag.** New sites land with `writes: false` and can only be read.
-   Flip it on while a build is in flight, then flip it back.
+1. **Per-site `writes` flag.** Staging sites ship with `writes: true` so the team can
+   actually work. Live sites ship with `writes: false` and are read-only until someone
+   deliberately changes that.
 2. **Default-deny classification.** An ability is a write unless its name clearly reads.
    Unrecognised abilities (Novamira adds them often) count as writes until a human reviews them.
 3. **Live-site root block.** PHP execution, file writes, and WP-CLI are refused on any site
@@ -76,7 +77,8 @@ npm run dev            # boots on :8080, logs every site it loaded and every one
 The boot log is the config check. It prints each usable site with its env and writes flag,
 and each skipped site with the reason (no base URL, missing secret, http not https).
 
-Leave `ALLOW_LIVE_ROOT` unset. Leave every site at `writes: false`.
+Leave `ALLOW_LIVE_ROOT` unset. Staging sites can have `writes: true`; leave live sites at
+`writes: false`.
 
 ### 4. Deploy
 
@@ -127,6 +129,29 @@ something `execute-php` can take 60s to answer.
 Whatever you pick: secrets as secrets, never baked into the image, and never commit
 `registry.json` or `.env`.
 
+### 4b. If the domain does not answer at all
+
+A green build with a dead process is the normal Hostinger failure. Open the domain root in
+a browser first: a healthy gateway serves a plain-text `Indak WP Gateway is running` page
+there. If you get that, the process is alive and any remaining problem is ClickUp-side.
+
+If the root gives you nothing, a Hostinger placeholder, or a 503, check **Runtime Logs**
+(not the build log) in that order:
+
+1. **`=== GATEWAY DID NOT START ===`** in the log. The gateway refuses to boot without
+   `GATEWAY_TOKEN` and a registry, on purpose, and the message names the missing piece.
+   This is the most common cause: env vars were never set, so the build went green and the
+   process died on first start.
+2. **Entry file** must be `src/server.js`. If it is blank or wrong, nothing ever launches.
+3. **`PORT` must not be set by you.** Hostinger assigns it. If you set it, Hostinger cannot
+   route to the app and you get a 503 forever.
+4. **Build command must be empty.** There are no dependencies and nothing to build; a
+   `npm run build` that does not exist fails the deploy.
+5. **The domain slot.** If that domain already existed as a website in hPanel, the Web App
+   flow will not have taken it over. Remove the old website or deploy to a fresh subdomain.
+6. **Cold start.** The process stops when idle, so the very first request after a quiet
+   spell can take a few seconds. Try twice before concluding it is down.
+
 ### 5. Verify the deploy (this is the part people skip)
 
 ```bash
@@ -164,34 +189,57 @@ per-site `writes` flag as the real guardrail, because it is. `GATEWAY_TOKEN_READ
 there for a second client (Claude Desktop, a script, another workspace), not a second
 ClickUp connection.
 
-## What this looks like for everyone else
+## What this looks like for the team
 
-Nothing. That is the point.
+Nothing to install, nothing to configure, no token to hold, no site key to memorize.
 
-A Workspace connection means the four tools are already in Brain for every member. Nobody
-installs anything, nobody holds a token, nobody learns a site key. They ask in plain
-language and Brain calls `wp_list_sites` to resolve it:
+One **Workspace** connection puts the four tools in Brain for every member, in the browser
+app and in Brain MAX on desktop and mobile. (Note: MCP connections can only be *created*
+from the ClickUp browser app. Set it up there once; it works everywhere after that.)
+They ask in plain language and Brain calls `wp_list_sites` to resolve the site itself:
 
 - "What plugins are running on the StrengthenND site?"
-- "Is there an SEO redirect for /old-pricing on the Indak site?"
-- "Which pages on Lund Oil are missing a meta description?"
+- "Is there a redirect for /old-pricing on the Indak site?"
+- "Which Lund Oil pages are missing a meta description?"
+- "Add a 301 from /party-bus to /party-bus-rentals on the Mysticon staging site."
 
-Reads work everywhere, always. Writes are refused unless someone has deliberately flipped
-`writes: true` for that site, and the refusal is a plain sentence the asker can act on
-("Writes are disabled for Lund Oil, so that was not run"), not an error trace.
+**The default posture, so nobody has to ask permission for normal work:**
 
-**The one habit worth enforcing:** flipping `writes: true` is a deliberate act, announced in
-the channel, and flipped back when the build ships. Everything else in here is automatic.
-If you skip that habit, you have handed the whole team root on every client site, which is
-the failure mode this design is built to avoid.
+| | Reads | Writes | PHP / file writes / WP-CLI |
+|---|---|---|---|
+| Staging sites | anyone | anyone | anyone |
+| Live sites | anyone | refused | refused |
+
+That is deliberate. Staging is disposable, so the team can build there without waiting on
+you, which is the productivity part. Live client sites are read-only, and root-class
+abilities are refused on live even if someone flips the writes flag, because Novamira's
+`execute-php` on a live client site is the one mistake you cannot undo from a chat window.
+
+When something is refused, Brain gets a plain sentence and passes it on ("Writes are
+disabled for Hall RV, so that was not run") instead of an error trace or a silent retry.
 
 Who needs what:
 
 | Person | Needs | Can do |
 |---|---|---|
-| Everyone at Indak | nothing | Read any registered site through Brain |
-| Whoever is building | writes flipped on for that site, on staging | Everything Novamira can do |
-| You | host access to edit `REGISTRY_JSON` and secrets | Add sites, flip writes, read the audit log |
+| Everyone at Indak | nothing | Read any site, build freely on staging |
+| You | host access to edit `REGISTRY_JSON` and secrets | Add sites, allow a live write, read the audit log |
+
+### Paste this in the team channel once it is live
+
+> The WordPress sites are now in Brain. Just ask: "what plugins are on the StrengthenND
+> site", "which Lund Oil pages are missing meta descriptions", "add a redirect on Mysticon
+> staging". You don't need to set anything up and you don't need to know a site key, Brain
+> figures out which site you mean. Staging sites you can change freely. Live sites are
+> read-only on purpose: if you need a change on a live site, ask me and I'll open it up for
+> the duration of the build.
+
+### Why not a Super Agent
+
+You could add these four tools to a Super Agent, but don't. Brain-native tools mean every
+member gets them with zero setup and no per-user credit burn, which is the whole point of
+running this on an unlimited plan. A Super Agent adds a step and a bill for something Brain
+already does.
 
 ## Adding sites 3 through 14
 
@@ -213,7 +261,7 @@ That prints the exact registry entry and the env var name to set. Then:
    secret is skipped with the reason printed, so the boot log is your config check.
 4. **Verify** the new site *and* an existing one both answer in the same Brain conversation.
    That is the whole premise; test it every time.
-5. Leave `writes: false` until a build actually starts.
+5. `npm run add-site` sets `writes` for you: true for staging, false for live.
 
 Site key convention: lowercase of the client's ClickUp Space abbreviation, so the key people
 say out loud matches where the work is tracked. Keep `-staging` in the **label**, not just

@@ -14,7 +14,7 @@
     "env": "staging",
     "user": "novamira-bot",
     "appPasswordEnv": "WP_PW_STRENGTHENND",
-    "writes": false,
+    "writes": true,
     "rateLimitPerMin": 30
   },
 
@@ -34,7 +34,7 @@
     "env": "staging",
     "user": "novamira-bot",
     "appPasswordEnv": "WP_PW_CLIENTKEY",
-    "writes": false,
+    "writes": true,
     "rateLimitPerMin": 30,
     "mcpPath": "/wp-json/mcp-adapter/mcp",
     "disabled": true

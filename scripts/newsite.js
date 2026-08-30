@@ -59,7 +59,9 @@ const entry = {
     env: e,
     user: 'novamira-bot',
     appPasswordEnv: secret,
-    writes: false,
+    // Staging is disposable, so the team can actually work. Live stays read-only,
+    // and root-class abilities are refused on live regardless of this flag.
+    writes: e === 'staging',
   },
 };
 
@@ -78,5 +80,7 @@ ${JSON.stringify(entry, null, 2).replace(/^\{\n|\n\}$/g, '').replace(/^ {2}/gm, 
 4. Redeploy or restart, then confirm the boot log lists "${k}" and that ${k} AND an
    existing site both answer in the same Brain conversation.
 
-writes is false. Leave it there until a build is actually in flight.
+${e === 'staging'
+  ? 'writes is true because this is staging: the team can build here without asking you first.'
+  : 'writes is FALSE because this is LIVE. Reads work for everyone. Root-class abilities\n(PHP, file writes, WP-CLI) are refused on live no matter what this flag says.'}
 `);
