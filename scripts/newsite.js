@@ -66,21 +66,27 @@ const entry = {
 };
 
 console.log(`
-1. Add this to the registry (registry.json locally, or the REGISTRY_JSON env var on the host):
+1. Add this line to the SITES environment variable on the host
+   (one site per line, and it needs no quotes or braces):
 
-${JSON.stringify(entry, null, 2).replace(/^\{\n|\n\}$/g, '').replace(/^ {2}/gm, '')}
+   ${k} | ${lbl} | ${origin} | ${e}${e === 'live' ? ' | false' : ''}
 
-2. Set this secret on the host to ${lbl}'s WordPress application password for novamira-bot:
+2. Add this password variable, set to ${lbl}'s WordPress
+   application password for the novamira-bot user:
 
    ${secret}
 
 3. On ${origin}: Novamira active with AI Abilities enabled, a novamira-bot admin user,
    and an application password generated for it.
 
-4. Redeploy or restart, then confirm the boot log lists "${k}" and that ${k} AND an
+4. Redeploy or restart, then confirm the domain root lists "${k}", and that ${k} AND an
    existing site both answer in the same Brain conversation.
 
 ${e === 'staging'
-  ? 'writes is true because this is staging: the team can build here without asking you first.'
-  : 'writes is FALSE because this is LIVE. Reads work for everyone. Root-class abilities\n(PHP, file writes, WP-CLI) are refused on live no matter what this flag says.'}
+  ? 'Writes are on because this is staging: the team can build here without asking you first.'
+  : 'Writes are OFF because this is LIVE. Reads work for everyone. Root-class abilities\n(PHP, file writes, WP-CLI) are refused on live no matter what.'}
+
+Equivalent JSON, if you would rather use REGISTRY_JSON:
+
+${JSON.stringify(entry, null, 2).replace(/^\{\n|\n\}$/g, '').replace(/^ {2}/gm, '')}
 `);

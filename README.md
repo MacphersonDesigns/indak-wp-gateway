@@ -84,9 +84,25 @@ Leave `ALLOW_LIVE_ROOT` unset. Staging sites can have `writes: true`; leave live
 
 Needs a stable public HTTPS hostname: ClickUp cannot reach localhost or an interactive tunnel.
 
-Supply the registry as the **`REGISTRY_JSON` env var** on any host that builds from git.
-`registry.json` is gitignored (it names your sites and secret vars), so the env var keeps
-secrets out of the repo and makes adding a site an env edit instead of a code push.
+Supply the registry through an **env var**, not the file: `registry.json` is gitignored, and
+an env var makes adding a site one edit with no code push.
+
+**Use `SITES`.** It is pipe-delimited with no quotes or braces, because hosting panels
+(Hostinger's included) escape JSON punctuation on paste and hand your app `\{"key"...`,
+which is not parseable JSON:
+
+```
+SITES = mysticon | Mysticon | https://mysticonnd.com | live
+        snd | Strengthen ND (staging) | https://staging.strengthennd.org | staging
+```
+
+`key | Label | https://url | live or staging | writes(optional)`. One site per line. `env`
+is guessed from the URL if omitted, and `writes` defaults to true on staging, false on live.
+
+`REGISTRY_JSON` still works and now un-mangles host-added backslashes automatically, and
+`REGISTRY_B64` (base64 of the JSON) is there if a panel mangles it some other way. Use the
+JSON forms only when you need a per-site `user`, `mcpPath`, `rateLimitPerMin`, or `timeoutMs`.
+Precedence: `SITES` > `REGISTRY_B64` > `REGISTRY_JSON` > `registry.json`.
 
 **Hostinger** works, on the right plan. hPanel > Websites > Add Website > **Web App**,
 deploy from GitHub. Requires **Business Web Hosting** or any **Cloud** plan; Premium and
@@ -99,12 +115,15 @@ single shared plans have no Node runtime. Settings:
 | Build command | leave empty (zero dependencies, nothing to build) |
 | Entry file | `src/server.js` |
 | Output directory | leave empty |
-| Environment variables | `GATEWAY_TOKEN`, `REGISTRY_JSON`, and one `WP_PW_*` per site |
+| Environment variables | `GATEWAY_TOKEN`, `SITES`, and one `WP_PW_*` per site |
 
 Hostinger gotchas, in the order you will hit them:
 
 - **Do not set `PORT`.** Hostinger assigns it and passes it in the environment. The server
   reads `process.env.PORT` already. Hardcode it and you get a 503 with a healthy build.
+- **The env var editor escapes JSON.** Paste `{"a":"b"}` and the app receives
+  `\{\"a\":\"b\"\}`. Use `SITES` and the problem disappears. (`REGISTRY_JSON` now
+  strips that escaping too, but why fight it.)
 - **The process stops when idle** and starts again on the next request. Fine here: the
   gateway is stateless with no dependencies, so a cold start is fast. Expect the first
   Brain call after a quiet spell to take a beat longer.

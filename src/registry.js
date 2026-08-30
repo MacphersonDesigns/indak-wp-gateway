@@ -8,26 +8,90 @@ const path = require('path');
  * from the env var named by appPasswordEnv. Sites without a base URL or
  * without their secret present are skipped, loudly.
  */
+/**
+ * Some hosts (Hostinger's env var editor among them) escape quotes and braces when
+ * you paste JSON, so the value arrives as \{"key"... and JSON.parse chokes. Undo the
+ * common manglings rather than making the user fight the panel.
+ */
+function unmangle(raw) {
+  let v = String(raw).trim();
+  // A value wrapped in quotes by the panel.
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    v = v.slice(1, -1).trim();
+  }
+  // Backslashes in front of JSON punctuation are never valid JSON, so they are always
+  // escaping added by the host.
+  if (/\\[{}"\[\]:,]/.test(v)) v = v.replace(/\\([{}"\[\]:,])/g, '$1');
+  // Smart quotes, courtesy of anyone who round-tripped this through a doc.
+  v = v.replace(/[\u201c\u201d]/g, '"').replace(/[\u2018\u2019]/g, "'");
+  return v;
+}
+
+/**
+ * SITES: an escape-proof alternative to REGISTRY_JSON for panels that mangle quotes.
+ * One site per line (or separated by ";"), pipe-delimited:
+ *
+ *   key | Label | https://url | live|staging | writes(true/false)
+ *
+ * env and writes are optional: env is guessed from the URL, and writes defaults to
+ * true on staging and false on live.
+ */
+function parseSites(raw) {
+  const out = {};
+  const rows = String(raw).split(/[\n;]+/).map((r) => r.trim()).filter(Boolean);
+  for (const row of rows) {
+    const parts = row.split('|').map((x) => x.trim());
+    const [key, label, base] = parts;
+    if (!key || !base) throw new Error(`SITES row needs at least "key | Label | https://url", got: ${row}`);
+    let env = (parts[3] || '').toLowerCase();
+    if (env !== 'live' && env !== 'staging') env = /staging|dev\.|test\./i.test(base) ? 'staging' : 'live';
+    const writesRaw = (parts[4] || '').toLowerCase();
+    const writes = writesRaw ? writesRaw === 'true' || writesRaw === 'yes' : env === 'staging';
+    out[key.toLowerCase()] = { label: label || key, base, env, writes };
+  }
+  if (!Object.keys(out).length) throw new Error('SITES was set but contained no rows.');
+  return out;
+}
+
 function loadRegistry(file) {
   let raw;
   let source;
 
-  // REGISTRY_JSON wins. Hosts that build from a git repo (Hostinger Web Apps,
-  // Railway, Fly) should use it: registry.json is gitignored on purpose, so
-  // adding a site becomes "edit one env var", with no code push.
-  if (process.env.REGISTRY_JSON) {
-    source = 'REGISTRY_JSON env var';
+  // Precedence: SITES (simplest) -> REGISTRY_B64 -> REGISTRY_JSON -> registry.json file.
+  if (process.env.SITES) {
+    source = 'SITES env var';
+    raw = parseSites(process.env.SITES);
+  } else if (process.env.REGISTRY_B64) {
+    source = 'REGISTRY_B64 env var';
+    let decoded;
     try {
-      raw = JSON.parse(process.env.REGISTRY_JSON);
+      decoded = Buffer.from(process.env.REGISTRY_B64.trim(), 'base64').toString('utf8');
     } catch (e) {
-      throw new Error(`REGISTRY_JSON is not valid JSON: ${e.message}`);
+      throw new Error(`REGISTRY_B64 is not valid base64: ${e.message}`);
+    }
+    try {
+      raw = JSON.parse(decoded);
+    } catch (e) {
+      throw new Error(`REGISTRY_B64 decoded to something that is not JSON: ${e.message}`);
+    }
+  } else if (process.env.REGISTRY_JSON) {
+    source = 'REGISTRY_JSON env var';
+    const cleaned = unmangle(process.env.REGISTRY_JSON);
+    try {
+      raw = JSON.parse(cleaned);
+    } catch (e) {
+      throw new Error(
+        `REGISTRY_JSON is not valid JSON: ${e.message}. ` +
+        `If your hosting panel added backslashes, use the SITES variable instead: ` +
+        `SITES=key | Label | https://url | staging`
+      );
     }
   } else {
     const abs = path.resolve(file || process.env.REGISTRY_FILE || 'registry.json');
     if (!fs.existsSync(abs)) {
       throw new Error(
-        `No registry found. Either set the REGISTRY_JSON env var (recommended when deploying) ` +
-        `or create ${abs} (cp registry.example.json registry.json).`
+        `No site registry configured. Set the SITES env var (simplest) or REGISTRY_JSON, ` +
+        `or create ${abs} locally.`
       );
     }
     source = abs;

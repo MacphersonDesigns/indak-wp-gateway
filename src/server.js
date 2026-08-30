@@ -349,13 +349,14 @@ const server = http.createServer(async (req, res) => {
       body =
         `Indak WP Gateway is RUNNING but NOT CONFIGURED.\n\n` +
         `Problem: ${CONFIG_ERROR}\n\n` +
-        `Fix it by adding this environment variable on your host, then redeploy:\n\n` +
-        `  REGISTRY_JSON = {"mysticon":{"label":"Mysticon","base":"https://example.com",\n` +
-        `                   "env":"live","user":"novamira-bot",\n` +
-        `                   "appPasswordEnv":"WP_PW_MYSTICON","writes":false}}\n\n` +
-        `...on one line, plus WP_PW_MYSTICON set to that site's WordPress\n` +
-        `application password for the novamira-bot user.\n\n` +
-        `Every ability call is refused until the registry loads.\n`;
+        `FIX: add ONE environment variable named SITES, then redeploy.\n` +
+        `No quotes, no braces, nothing for a hosting panel to mangle.\n\n` +
+        `  SITES = mysticon | Mysticon | https://mysticonnd.com | live\n\n` +
+        `Format is:  key | Label | https://url | live or staging\n` +
+        `One site per line. Add more lines for more sites.\n\n` +
+        `Then one password variable per site, named WP_PW_ plus the key in caps:\n\n` +
+        `  WP_PW_MYSTICON = that site's WordPress application password for novamira-bot\n\n` +
+        `Every ability call is refused until this loads.\n`;
     } else {
       const skipped = REGISTRY.skipped.length;
       body =
