@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Indak Gateway Site Manager</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <p class="eyebrow">Indak Media</p>
+      <h1>WordPress Site Manager</h1>
+      <p class="lede">Create a one-time code, then paste it into Settings → Indak Gateway on the WordPress site.</p>
+    </header>
+
+    <section class="panel" aria-labelledby="access-heading">
+      <h2 id="access-heading">Manager access</h2>
+      <div class="field-row">
+        <label for="admin-token">Gateway admin token</label>
+        <input id="admin-token" type="password" autocomplete="current-password" spellcheck="false">
+        <button id="load-sites" type="button">Open Site Manager</button>
+      </div>
+      <p class="hint">The token stays in this browser tab only and is never saved by the page.</p>
+    </section>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <section id="manager" class="manager" hidden>
+      <section class="panel" aria-labelledby="add-heading">
+        <h2 id="add-heading">Add a WordPress site</h2>
+        <form id="pairing-form">
+          <div class="grid">
+            <div class="field full">
+              <label for="mcp-url">Complete Novamira MCP URL</label>
+              <input id="mcp-url" name="mcp_url" type="url" required placeholder="https://stage.example.com/divi/wp-json/mcp/novamira">
+              <p class="hint">Paste the complete URL. Subdirectories such as <code>/divi</code> are supported.</p>
+            </div>
+            <div class="field">
+              <label for="site-key">Site key</label>
+              <input id="site-key" name="site_key" required pattern="[a-z0-9][a-z0-9-]{0,79}" placeholder="trilogy-divi">
+            </div>
+            <div class="field">
+              <label for="label">Team-facing label</label>
+              <input id="label" name="label" required maxlength="180" placeholder="Trilogy Divi conversion">
+            </div>
+            <div class="field">
+              <label for="environment">Environment</label>
+              <select id="environment" name="environment">
+                <option value="staging">Staging</option>
+                <option value="live">Live</option>
+              </select>
+            </div>
+            <div class="field checkbox-field">
+              <label><input id="writes" name="writes" type="checkbox" checked> Allow write abilities</label>
+              <p class="hint">Always forced off for live sites.</p>
+            </div>
+          </div>
+          <button type="submit">Create pairing code</button>
+        </form>
+
+        <div id="pairing-result" class="pairing-result" hidden tabindex="-1">
+          <h3>Pairing code</h3>
+          <output id="pairing-code"></output>
+          <p id="pairing-expiry"></p>
+          <button id="copy-code" type="button">Copy code</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="sites-heading">
+        <div class="section-heading">
+          <h2 id="sites-heading">Paired sites</h2>
+          <button id="refresh-sites" class="secondary" type="button">Refresh</button>
+        </div>
+        <div class="table-scroll" tabindex="0" aria-label="Paired sites table">
+          <table>
+            <caption class="screen-reader-text">WordPress sites paired through the database registry</caption>
+            <thead><tr><th>Site</th><th>Environment</th><th>Status</th><th>MCP URL</th><th>Verified</th></tr></thead>
+            <tbody id="sites-body"></tbody>
+          </table>
+        </div>
+        <p id="empty-sites" class="empty">No database-paired sites yet.</p>
+      </section>
+    </section>
+  </main>
+  <script src="/admin/admin.js" defer></script>
+</body>
+</html>

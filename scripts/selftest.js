@@ -75,12 +75,17 @@ function fakeWordPress(label, expectedPassword) {
   const gw2 = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js')], {
     env: { ...process.env, PORT: String(PORT), GATEWAY_TOKEN: TOKEN, GATEWAY_TOKEN_READONLY: RO,
            REGISTRY_FILE: registry, ALLOW_INSECURE_UPSTREAM: 'true',
-           WP_PW_INDAK: 'pw-live', WP_PW_STRENGTHENND: 'pw-staging', HOST: '127.0.0.1' },
+           WP_PW_INDAK: 'pw-live', WP_PW_STRENGTHENND: 'pw-staging', HOST: '127.0.0.1',
+           // An unreachable database proves the legacy registry remains available during a
+           // Hostinger/MySQL outage. Connected persistence is covered by site-manager-selftest.
+           DB_HOST: '127.0.0.1', DB_PORT: '1', DB_NAME: 'unreachable', DB_USER: 'unreachable',
+           DB_PASSWORD: 'unreachable', DB_CONNECT_TIMEOUT_MS: '1000',
+           REGISTRY_ENCRYPTION_KEY: '12'.repeat(32) },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   let boot = '';
   gw2.stdout.on('data', (d) => { boot += d.toString(); });
-  await new Promise((r) => setTimeout(r, 700));
+  await new Promise((r) => setTimeout(r, 1500));
 
   const base = `http://127.0.0.1:${PORT}`;
   const rpc = async (method, params, token = TOKEN) => {
@@ -100,6 +105,7 @@ function fakeWordPress(label, expectedPassword) {
   console.log('\n== health + auth');
   const h = await (await fetch(`${base}/healthz`)).json();
   h.ok && h.sites === 2 ? ok(`healthz -> ${JSON.stringify(h)}`) : no(`healthz -> ${JSON.stringify(h)}`);
+  h.database === 'degraded' ? ok('database outage preserved the environment registry') : no(`database fallback -> ${JSON.stringify(h)}`);
   const un = await fetch(`${base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   un.status === 401 ? ok('no token -> 401') : no(`no token -> ${un.status}`);
   const bad = await rpc('tools/list', {}, 'c'.repeat(64));

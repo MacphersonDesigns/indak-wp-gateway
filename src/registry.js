@@ -36,20 +36,84 @@ function unmangle(raw) {
  * env and writes are optional: env is guessed from the URL, and writes defaults to
  * true on staging and false on live.
  */
+function keyFromUrl(base) {
+  let host;
+  try { host = new URL(base).hostname; } catch { return null; }
+  const parts = host.toLowerCase().replace(/^www\./, '').split('.');
+  // staging.strengthennd.org -> strengthennd ; mysticonnd.com -> mysticonnd
+  const meaningful = parts.filter((p) => !['staging', 'stage', 'dev', 'test', 'www'].includes(p));
+  const name = meaningful.length > 1 ? meaningful[meaningful.length - 2] : meaningful[0] || parts[0];
+  return name.replace(/[^a-z0-9-]/g, '') || null;
+}
+
+function titleFromKey(key) {
+  return key.replace(/-/g, ' ').replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+/**
+ * SITES: escape-proof site list for hosting panels that mangle JSON punctuation.
+ * One site per line (or separated by ";"). Every one of these is valid:
+ *
+ *   https://mysticonnd.com                          <- key and label derived from the domain
+ *   snd = https://staging.strengthennd.org          <- explicit key
+ *   snd | Strengthen ND (staging) | https://...     <- explicit label
+ *   hallrv | Hall RV | https://hallrv.com | live | false
+ *
+ * Field order in the pipe form: key | Label | url | env | writes
+ * env is inferred from the URL when absent; writes defaults to true on staging,
+ * false on live. Lines starting with # are ignored.
+ */
 function parseSites(raw) {
   const out = {};
-  const rows = String(raw).split(/[\n;]+/).map((r) => r.trim()).filter(Boolean);
+  const rows = String(raw)
+    .split(/[\n;]+/)
+    .map((r) => r.trim())
+    .filter((r) => r && !r.startsWith('#'));
+
   for (const row of rows) {
-    const parts = row.split('|').map((x) => x.trim());
-    const [key, label, base] = parts;
-    if (!key || !base) throw new Error(`SITES row needs at least "key | Label | https://url", got: ${row}`);
-    let env = (parts[3] || '').toLowerCase();
-    if (env !== 'live' && env !== 'staging') env = /staging|dev\.|test\./i.test(base) ? 'staging' : 'live';
-    const writesRaw = (parts[4] || '').toLowerCase();
-    const writes = writesRaw ? writesRaw === 'true' || writesRaw === 'yes' : env === 'staging';
-    out[key.toLowerCase()] = { label: label || key, base, env, writes };
+    let key = null, label = null, base = null, envRaw = '', writesRaw = '';
+
+    if (row.includes('|')) {
+      const parts = row.split('|').map((x) => x.trim());
+      // Find the field that is a URL; everything else is positional around it.
+      const urlAt = parts.findIndex((x) => /^https?:\/\//i.test(x));
+      if (urlAt === -1) throw new Error(`SITES row has no https:// URL: ${row}`);
+      base = parts[urlAt];
+      if (urlAt >= 1) key = parts[0] || null;
+      if (urlAt >= 2) label = parts[1] || null;
+      envRaw = (parts[urlAt + 1] || '').toLowerCase();
+      writesRaw = (parts[urlAt + 2] || '').toLowerCase();
+    } else if (row.includes('=')) {
+      const i = row.indexOf('=');
+      key = row.slice(0, i).trim();
+      base = row.slice(i + 1).trim();
+    } else {
+      base = row;
+    }
+
+    if (!/^https?:\/\//i.test(base)) {
+      throw new Error(`SITES row is not a URL and not "key = url" or "key | Label | url": ${row}`);
+    }
+
+    key = (key || keyFromUrl(base) || '').toLowerCase();
+    if (!key) throw new Error(`Could not work out a site key from: ${row}`);
+
+    let env = envRaw;
+    if (env !== 'live' && env !== 'staging') {
+      env = /(^|[.\/-])(staging|stage|dev|test)([.\/-]|$)|hostingersite\.com$/i.test(base) ? 'staging' : 'live';
+    }
+    const writes = writesRaw
+      ? writesRaw === 'true' || writesRaw === 'yes' || writesRaw === 'on'
+      : env === 'staging';
+
+    if (!label) {
+      label = titleFromKey(key) + (env === 'staging' ? ' (staging)' : '');
+    }
+    if (out[key]) throw new Error(`SITES lists the key "${key}" twice. Give one of them an explicit key.`);
+    out[key] = { label, base, env, writes };
   }
-  if (!Object.keys(out).length) throw new Error('SITES was set but contained no rows.');
+
+  if (!Object.keys(out).length) throw new Error('SITES was set but contained no site rows.');
   return out;
 }
 

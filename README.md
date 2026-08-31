@@ -44,6 +44,28 @@ errors, so the agent explains the block to the user instead of retrying blindly.
 
 ## Start here (about 30 minutes)
 
+### First boot checklist
+
+The MCP gateway still runs without a database, but the Site Manager and connector pairing
+need MariaDB. Local development starts with Docker Compose:
+
+```bash
+cp .env.example .env
+docker compose up -d database
+DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=indak_gateway \
+  DB_USER=indak_gateway DB_PASSWORD=local-development-only npm run db:migrate
+node scripts/selftest.js
+DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=indak_gateway \
+  DB_USER=indak_gateway DB_PASSWORD=local-development-only npm run selftest:site-manager
+DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=indak_gateway \
+  DB_USER=indak_gateway DB_PASSWORD=local-development-only npm run selftest:pairing
+npm run selftest:connector
+```
+
+Green means 22 gateway checks, 8 encrypted-registry checks, 7 pairing checks, seven PHP
+syntax checks, and six connector credential checks. Docker stores MariaDB data in the named
+`gateway_database` volume, so container replacement does not erase paired sites.
+
 ### 1. Prove it works on your laptop, with no WordPress at all
 
 ```bash
@@ -87,17 +109,28 @@ Needs a stable public HTTPS hostname: ClickUp cannot reach localhost or an inter
 Supply the registry through an **env var**, not the file: `registry.json` is gitignored, and
 an env var makes adding a site one edit with no code push.
 
-**Use `SITES`.** It is pipe-delimited with no quotes or braces, because hosting panels
-(Hostinger's included) escape JSON punctuation on paste and hand your app `\{"key"...`,
-which is not parseable JSON:
+**Use `SITES`.** No quotes, no braces, so there is nothing for a hosting panel's env var
+editor to escape (Hostinger's rewrites JSON punctuation on paste and hands the app
+`\{"key"...`, which will not parse). One site per line, and the short form is usually enough:
 
 ```
-SITES = mysticon | Mysticon | https://mysticonnd.com | live
-        snd | Strengthen ND (staging) | https://staging.strengthennd.org | staging
+SITES = https://mysticonnd.com
+        https://staging.strengthennd.org
+        hallrv | Hall RV & Rentals | https://hallrv.com
 ```
 
-`key | Label | https://url | live or staging | writes(optional)`. One site per line. `env`
-is guessed from the URL if omitted, and `writes` defaults to true on staging, false on live.
+A bare URL is a complete entry. The key comes from the domain, the label from the key, and
+`env` from the URL (anything with `staging`/`dev`/`test`, or a `hostingersite.com` temp
+domain, is treated as staging). Override any of it when you care:
+
+| Form | Use when |
+|---|---|
+| `https://hallrv.com` | Normal. Key becomes `hallrv`. |
+| `hrv = https://hallrv.com` | You want the key to match the ClickUp Space abbreviation. |
+| `hrv \| Hall RV & Rentals \| https://hallrv.com` | You want a specific label in Brain's output. |
+| `hrv \| Hall RV \| https://hallrv.com \| live \| false` | You want to pin env and writes explicitly. |
+
+Lines starting with `#` are ignored, so you can park a site without deleting it.
 
 `REGISTRY_JSON` still works and now un-mangles host-added backslashes automatically, and
 `REGISTRY_B64` (base64 of the JSON) is there if a panel mangles it some other way. Use the
@@ -261,33 +294,116 @@ member gets them with zero setup and no per-user credit burn, which is the whole
 running this on an unlimited plan. A Super Agent adds a step and a bill for something Brain
 already does.
 
-## Adding sites 3 through 14
+## Pairing a site through Site Manager
 
-Two things per site: a registry entry and one secret. No ClickUp changes, no reconnecting,
-no new tools, no code edit.
+This is the normal workflow for the 40+ site fleet. It requires no Hostinger environment
+edit and no gateway redeployment after the one-time database setup.
 
-```bash
-npm run add-site lundoil "Lund Oil (staging)" https://staging.lundoil.com staging
+1. Visit `https://<gateway-host>/admin`.
+2. Enter `GATEWAY_ADMIN_TOKEN`. It is kept in browser `sessionStorage`, not persistent local
+   storage.
+3. Paste the site's complete Novamira URL, for example
+   `https://stage.tgy.indakmediahosting.com/divi/wp-json/mcp/novamira`.
+4. Enter a stable key and label, choose staging or live, and create a pairing code.
+5. Install the ZIP built from `wordpress/indak-gateway-connector` beside Novamira.
+6. In WordPress, open Settings > Indak Gateway, paste the one-time code, and connect.
+7. Refresh Site Manager and confirm the site is active.
+8. Call `wp_list_sites`, then discover abilities on the new site and an existing site in the
+   same ClickUp Brain conversation.
+
+Pairing codes expire after ten minutes, work once, and are bound to the exact HTTPS origin
+and MCP path. Each connector creates a different 256-bit credential. WordPress stores only a
+keyed digest; MySQL stores only AES-256-GCM ciphertext.
+
+### Production database variables
+
+```text
+DB_HOST=localhost
+DB_PORT=3306
+DB_NAME=<full Hostinger database name>
+DB_USER=<full Hostinger database user>
+DB_PASSWORD=<unique database password>
+GATEWAY_ADMIN_TOKEN=<64 hex characters>
+REGISTRY_ENCRYPTION_KEY=<64 hex characters>
 ```
 
-That prints the exact registry entry and the env var name to set. Then:
+Run `node scripts/migrate.js` once per deployment containing a new file under `migrations/`.
+The runner is forward-only and idempotent: applied files are recorded in
+`schema_migrations` and skipped on the next run.
 
-1. **On the WordPress site:** Novamira active with **Enable AI Abilities** checked, a
-   dedicated `novamira-bot` admin user, an Application Password generated for it. Grab the
-   MCP endpoint path from Novamira > Configuration if it is not the default.
-2. **On the host:** paste the entry into `REGISTRY_JSON` and set `WP_PW_LUNDOIL` to that
-   application password.
-3. **Restart** and check the boot log lists the new key. A site with no `base` or a missing
-   secret is skipped with the reason printed, so the boot log is your config check.
-4. **Verify** the new site *and* an existing one both answer in the same Brain conversation.
-   That is the whole premise; test it every time.
-5. `npm run add-site` sets `writes` for you: true for staging, false for live.
+If MySQL is temporarily unavailable, the gateway keeps serving usable `SITES`/JSON entries
+and reports `"database":"degraded"` from `/healthz`. Database-only sites cannot be served
+until MySQL returns; they are never silently routed to another key.
+
+## Legacy manual onboarding fallback
+
+Run one snippet on the site, paste two lines into the gateway. That is the whole loop.
+
+### On the WordPress site
+
+Install and activate Novamira, tick **Enable AI Abilities**, then run
+`scripts/bootstrap-site.php` once. Any of these work:
+
+- **WP-CLI:** `wp eval-file bootstrap-site.php`
+- **Novamira itself:** paste the file contents into `novamira/execute-php`
+- **WPCode Lite** (already active on your sites): new PHP snippet, set it to **Run Once**,
+  paste, Save & Activate, read the output, then delete the snippet
+
+It creates the `novamira-bot` admin user, issues its Application Password, works out the
+site key and whether the site is staging or live, warns you if the site is not HTTPS or
+Novamira is not active, and prints exactly this:
+
+```
+1) Append this line to SITES:
+
+   hallrv | Hall RV & Rentals | https://hallrv.com | live
+
+2) Add this variable:
+
+   WP_PW_HALLRV = abcd EFGH ijkl MNOP qrst UVWX
+```
+
+Safe to run twice: it reuses an existing `novamira-bot` and reissues the password.
+
+### On the gateway
+
+Paste those two lines into the env vars, redeploy, and check the domain root shows the new
+count. Then verify the new site **and** an existing one both answer in the same Brain
+conversation. That is the premise of this whole thing; test it every time.
+
+If you would rather generate the registry line without touching the site yet:
+
+```bash
+npm run add-site hallrv "Hall RV & Rentals" https://hallrv.com live
+```
 
 Site key convention: lowercase of the client's ClickUp Space abbreviation, so the key people
-say out loud matches where the work is tracked. Keep `-staging` in the **label**, not just
-the key, so it shows up in Brain's output and nobody confuses live Lund Oil with a sandbox.
+say out loud matches where the work is tracked. Keep `staging` in the **label**, not just the
+key, so it shows up in Brain's output and nobody confuses live Lund Oil with a sandbox.
 
-To take a site offline without losing its config, set `"disabled": true` on its entry.
+To take a site offline without losing its config, comment its `SITES` line out with `#`.
+
+## Why Application Passwords and not OAuth
+
+OAuth is the right call for a browser and the wrong one here, and the difference is that the
+gateway is an unattended server.
+
+- **OAuth needs a human at a browser.** Fourteen sites means fourteen consent flows, and
+  then refresh tokens the gateway has to store and rotate. Hostinger rebuilds the app from
+  git on every deploy, so anything written to disk is not guaranteed to survive. Tokens
+  expiring quietly at 11pm is exactly the failure you do not want on client sites.
+- **Application Passwords never expire and are per-site revocable.** Delete the `wp-gateway`
+  password in that user's profile and that site is cut off in one click, with no effect on
+  any other site and no human login touched.
+- **Managed WordPress hosts flag cloud OAuth traffic as bot activity.** Basic auth from a
+  fixed origin does not trip the same alarms.
+- **OAuth would not reduce the work anyway.** You would still visit each site to install
+  Novamira and approve access. The bootstrap snippet already collapses that visit into one
+  paste, which is the part you actually wanted shorter.
+
+Where OAuth does belong: **ClickUp to gateway**, if you ever want per-person identity in the
+audit log instead of one shared Workspace token. Worth doing when the team is bigger than
+"everyone at Indak"; not worth it now.
 
 ## Layout
 
@@ -296,9 +412,14 @@ src/server.js     MCP protocol, auth, rate limit, audit log, tool surface
 src/upstream.js   MCP client for one Novamira install (Basic auth, SSE + JSON parsing)
 src/registry.js   registry.json loader and validator
 src/guard.js      read/write classification and the root-ability list
+src/site-manager/ encrypted MySQL registry, endpoint validation and pairing service
+public/admin/     protected Site Manager browser interface
+wordpress/indak-gateway-connector/  route-scoped WordPress companion plugin
+migrations/       forward-only Hostinger MySQL schema files
 scripts/selftest.js  offline end-to-end test with two fake WordPress installs
 scripts/smoke.sh     verify a deployed gateway
-scripts/newsite.js   print the registry entry + secret name for a new site
+scripts/newsite.js   print the registry line + secret name for a new site
+scripts/bootstrap-site.php  run once ON a client site: makes novamira-bot + its app password
 ```
 
 Upstream tool names are **discovered** at runtime via `tools/list` and matched by suffix,

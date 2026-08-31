@@ -2,9 +2,17 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { loadRegistry } = require('./registry');
 const { upstreamFor, UpstreamError } = require('./upstream');
 const { classify, isRootAbility } = require('./guard');
+const { databaseConfigured, createDatabasePool } = require('./site-manager/Database');
+const { parseMasterKey } = require('./site-manager/CredentialCipher');
+const { SiteRepository } = require('./site-manager/SiteRepository');
+const { mergeRegistries } = require('./site-manager/RegistryMerge');
+const { PairingService } = require('./site-manager/PairingService');
+const { version: VERSION } = require('../package.json');
 
 const PROTOCOL_VERSION = '2025-06-18';
 const MCP_PATH = process.env.MCP_PATH || '/mcp';
@@ -14,6 +22,7 @@ const ALLOW_LIVE_ROOT = process.env.ALLOW_LIVE_ROOT === 'true';
 
 const TOKEN = process.env.GATEWAY_TOKEN || '';
 const TOKEN_RO = process.env.GATEWAY_TOKEN_READONLY || '';
+const ADMIN_TOKEN = process.env.GATEWAY_ADMIN_TOKEN || '';
 function fatal(msg) {
   console.error('\n=== GATEWAY DID NOT START ===');
   console.error(msg);
@@ -31,21 +40,78 @@ if (TOKEN_RO && TOKEN_RO === TOKEN) {
   fatal('GATEWAY_TOKEN_READONLY must be a different value from GATEWAY_TOKEN.');
 }
 
-let REGISTRY;
+let REGISTRY = { sites: {}, skipped: [], file: 'not loaded' };
 let CONFIG_ERROR = null;
-try {
-  REGISTRY = loadRegistry();
-} catch (e) {
-  // Do NOT exit. A dead domain tells you nothing; a running gateway that reports
-  // exactly which env var is missing tells you everything. Tool calls are refused
-  // until this is fixed.
-  CONFIG_ERROR = e.message;
-  REGISTRY = { sites: {}, skipped: [], file: 'not loaded' };
-}
+let DATABASE_POOL = null;
+let DATABASE_STATUS = { configured: databaseConfigured(), connected: false, problem: null };
+let SITE_REPOSITORY = null;
+let PAIRING_SERVICE = null;
 
 // ---------------------------------------------------------------- audit log
 function audit(row) {
   process.stdout.write(JSON.stringify({ ts: new Date().toISOString(), ...row }) + '\n');
+}
+
+/**
+ * Build the runtime registry before opening the listening socket. Environment entries are
+ * the known-working fallback during rollout; MySQL entries add paired sites and become
+ * authoritative only when they describe the same endpoint.
+ */
+async function initializeRegistry() {
+  let environmentRegistry = { sites: {}, skipped: [], file: 'not loaded' };
+  let environmentError = null;
+  try {
+    environmentRegistry = loadRegistry();
+  } catch (error) {
+    environmentError = error.message;
+  }
+
+  let databaseRegistry = { sites: {}, skipped: [] };
+  if (DATABASE_STATUS.configured) {
+    try {
+      const masterKey = parseMasterKey();
+      DATABASE_POOL = createDatabasePool();
+      SITE_REPOSITORY = new SiteRepository(DATABASE_POOL, masterKey);
+      await SITE_REPOSITORY.ping();
+      databaseRegistry = await SITE_REPOSITORY.listActiveSites();
+      if (ADMIN_TOKEN.length >= 32) {
+        PAIRING_SERVICE = new PairingService(SITE_REPOSITORY, masterKey, {
+          allowInsecure: process.env.ALLOW_INSECURE_PAIRING === 'true',
+          allowPrivate: process.env.ALLOW_PRIVATE_PAIRING === 'true',
+        });
+      }
+      DATABASE_STATUS = { configured: true, connected: true, problem: null };
+    } catch (error) {
+      DATABASE_STATUS = { configured: true, connected: false, problem: error.message };
+      if (DATABASE_POOL) await DATABASE_POOL.end().catch(() => {});
+      DATABASE_POOL = null;
+      SITE_REPOSITORY = null;
+      PAIRING_SERVICE = null;
+    }
+  }
+
+  const merged = mergeRegistries(environmentRegistry, databaseRegistry);
+  REGISTRY = {
+    sites: merged.sites,
+    skipped: merged.skipped,
+    file: DATABASE_STATUS.connected
+      ? `${environmentRegistry.file} + Hostinger MySQL`
+      : environmentRegistry.file,
+  };
+
+  if (!Object.keys(REGISTRY.sites).length) {
+    const problems = [];
+    if (environmentError) problems.push(environmentError);
+    if (DATABASE_STATUS.configured && DATABASE_STATUS.problem) {
+      problems.push(`Database registry unavailable: ${DATABASE_STATUS.problem}`);
+    }
+    CONFIG_ERROR = problems.join(' ') || 'The registry loaded but contains no usable sites.';
+  } else {
+    CONFIG_ERROR = null;
+    if (DATABASE_STATUS.configured && DATABASE_STATUS.problem) {
+      REGISTRY.skipped.push({ key: 'database', why: DATABASE_STATUS.problem });
+    }
+  }
 }
 
 // ------------------------------------------------------------- rate limiter
@@ -81,6 +147,25 @@ function authenticate(req) {
   if (safeEq(presented, TOKEN)) return { scope: 'full' };
   if (TOKEN_RO && safeEq(presented, TOKEN_RO)) return { scope: 'read' };
   return null;
+}
+
+function authenticateAdmin(req) {
+  if (ADMIN_TOKEN.length < 32) return false;
+  const presented = String(req.headers.authorization || '')
+    .replace(/^Bearer\s+/i, '')
+    .trim();
+  return presented ? safeEq(presented, ADMIN_TOKEN) : false;
+}
+
+// Enrollment endpoints are intentionally much tighter than per-site MCP buckets. Pairing
+// performs DNS and upstream work, so an unauthenticated flood must be rejected cheaply.
+const enrollmentBuckets = new Map();
+function enrollmentLimited(key, limit = 20) {
+  const now = Date.now();
+  const recent = (enrollmentBuckets.get(key) || []).filter((time) => now - time < 60000);
+  recent.push(now);
+  enrollmentBuckets.set(key, recent);
+  return recent.length > limit;
 }
 
 // ------------------------------------------------------------- tool surface
@@ -289,7 +374,7 @@ async function handleRpc(msg, ctx) {
       return reply({
         protocolVersion: params?.protocolVersion || PROTOCOL_VERSION,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'indak-wp-gateway', version: '1.0.0' },
+        serverInfo: { name: 'indak-wp-gateway', version: VERSION },
         instructions:
           'One endpoint fronting every Indak-managed WordPress site running Novamira. ' +
           'Call wp_list_sites first to turn a site name into a key, then pass that key to the other tools.',
@@ -337,9 +422,87 @@ const json = (res, status, body) => {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  const adminAssets = {
+    '/admin': ['index.html', 'text/html; charset=utf-8'],
+    '/admin/': ['index.html', 'text/html; charset=utf-8'],
+    '/admin/admin.css': ['admin.css', 'text/css; charset=utf-8'],
+    '/admin/admin.js': ['admin.js', 'text/javascript; charset=utf-8'],
+  };
+  if (req.method === 'GET' && adminAssets[url.pathname]) {
+    const [file, contentType] = adminAssets[url.pathname];
+    const body = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin', file));
+    res.writeHead(200, {
+      'content-type': contentType,
+      'content-length': body.length,
+      'cache-control': 'no-store',
+      'content-security-policy': "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'no-referrer',
+    });
+    return res.end(body);
+  }
+
   if (url.pathname === '/healthz' || url.pathname === '/health') {
-    if (CONFIG_ERROR) return json(res, 503, { ok: false, sites: 0, problem: CONFIG_ERROR });
-    return json(res, 200, { ok: true, sites: Object.keys(REGISTRY.sites).length });
+    const database = DATABASE_STATUS.configured
+      ? DATABASE_STATUS.connected ? 'connected' : 'degraded'
+      : 'not-configured';
+    if (CONFIG_ERROR) return json(res, 503, { ok: false, sites: 0, database, problem: CONFIG_ERROR });
+    return json(res, 200, { ok: true, sites: Object.keys(REGISTRY.sites).length, database });
+  }
+
+  if (url.pathname === '/admin/sites' || url.pathname === '/admin/pairing-codes') {
+    if (!authenticateAdmin(req)) {
+      audit({ event: 'admin_auth_fail', ip: req.socket.remoteAddress, path: url.pathname });
+      res.setHeader('www-authenticate', 'Bearer');
+      return json(res, 401, { error: 'Unauthorized.' });
+    }
+    if (!SITE_REPOSITORY || !PAIRING_SERVICE) {
+      return json(res, 503, { error: 'Site Manager is unavailable. Check database and admin-token configuration.' });
+    }
+    if (enrollmentLimited(`admin:${req.socket.remoteAddress}`, 60)) {
+      return json(res, 429, { error: 'Site Manager rate limit exceeded. Try again shortly.' });
+    }
+    if (url.pathname === '/admin/sites' && req.method === 'GET') {
+      try {
+        return json(res, 200, { sites: await SITE_REPOSITORY.listSitesForAdmin() });
+      } catch (error) {
+        audit({ event: 'admin_error', action: 'list_sites', error: error.message });
+        return json(res, 500, { error: 'Could not load registered sites.' });
+      }
+    }
+    if (url.pathname === '/admin/pairing-codes' && req.method === 'POST') {
+      try {
+        const input = JSON.parse(await readBody(req, 64 * 1024));
+        const result = await PAIRING_SERVICE.createPairing(input, ADMIN_TOKEN);
+        audit({ event: 'pairing_code_created', site: result.site_key });
+        return json(res, 201, result);
+      } catch (error) {
+        audit({ event: 'admin_error', action: 'create_pairing', error: error.message });
+        return json(res, 400, { error: error.message });
+      }
+    }
+    return json(res, 405, { error: 'Method not allowed.' });
+  }
+
+  if (url.pathname === '/pairings/details' || url.pathname === '/pairings/claim') {
+    if (req.method !== 'POST') return json(res, 405, { error: 'Use POST.' });
+    if (!PAIRING_SERVICE) return json(res, 503, { error: 'Pairing is temporarily unavailable.' });
+    if (enrollmentLimited(`claim:${req.socket.remoteAddress}`, 10)) {
+      return json(res, 429, { error: 'Pairing rate limit exceeded. Create a new code and try again later.' });
+    }
+    try {
+      const input = JSON.parse(await readBody(req, 64 * 1024));
+      if (url.pathname === '/pairings/details') {
+        return json(res, 200, await PAIRING_SERVICE.pairingDetails(input));
+      }
+      const paired = await PAIRING_SERVICE.claimPairing(input);
+      REGISTRY.sites[paired.runtimeSite.key] = paired.runtimeSite;
+      audit({ event: 'site_paired', site: paired.result.site_key, env: paired.result.environment });
+      return json(res, 201, paired.result);
+    } catch (error) {
+      audit({ event: 'pairing_failed', ip: req.socket.remoteAddress, error: error.message });
+      return json(res, 400, { error: error.message });
+    }
   }
 
   // Proof of life you can check in a browser, and a checklist when it is unhappy.
@@ -421,29 +584,41 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 0;
 server.headersTimeout = 65000;
 
-server.listen(PORT, HOST, () => {
-  audit({
-    event: 'boot',
-    endpoint: `${MCP_PATH}`,
-    port: PORT,
-    registry: REGISTRY.file,
-    config_error: CONFIG_ERROR,
-    sites: Object.values(REGISTRY.sites).map((s) => `${s.key} (${s.env}, writes=${s.writes})`),
-    skipped: REGISTRY.skipped,
-    allow_live_root: ALLOW_LIVE_ROOT,
-    readonly_token: Boolean(TOKEN_RO),
+async function start() {
+  await initializeRegistry();
+  server.listen(PORT, HOST, () => {
+    audit({
+      event: 'boot',
+      endpoint: `${MCP_PATH}`,
+      port: PORT,
+      registry: REGISTRY.file,
+      config_error: CONFIG_ERROR,
+      database: DATABASE_STATUS,
+      sites: Object.values(REGISTRY.sites).map((s) => `${s.key} (${s.env}, writes=${s.writes})`),
+      skipped: REGISTRY.skipped,
+      allow_live_root: ALLOW_LIVE_ROOT,
+      readonly_token: Boolean(TOKEN_RO),
+    });
+    if (CONFIG_ERROR) {
+      console.error('\n=== GATEWAY IS RUNNING BUT NOT CONFIGURED ===');
+      console.error(CONFIG_ERROR);
+      console.error('Open the domain root in a browser for the fix. Tool calls are refused until then.');
+      console.error('============================================\n');
+    } else if (!Object.keys(REGISTRY.sites).length) {
+      console.error('WARNING: the registry loaded but contains no usable sites. Every tool call will fail.');
+    }
+    if (ALLOW_LIVE_ROOT) {
+      console.error('WARNING: ALLOW_LIVE_ROOT=true. PHP execution and file writes are permitted on LIVE client sites.');
+    }
   });
-  if (CONFIG_ERROR) {
-    console.error('\n=== GATEWAY IS RUNNING BUT NOT CONFIGURED ===');
-    console.error(CONFIG_ERROR);
-    console.error('Open the domain root in a browser for the fix. Tool calls are refused until then.');
-    console.error('============================================\n');
-  } else if (!Object.keys(REGISTRY.sites).length) {
-    console.error('WARNING: the registry loaded but contains no usable sites. Every tool call will fail.');
-  }
-  if (ALLOW_LIVE_ROOT) {
-    console.error('WARNING: ALLOW_LIVE_ROOT=true. PHP execution and file writes are permitted on LIVE client sites.');
-  }
+}
+
+start().catch((error) => {
+  // Only token validation may hard-exit. Unexpected startup failures remain visible instead
+  // of becoming a silent dead Hostinger domain.
+  CONFIG_ERROR = `Unexpected startup failure: ${error.message}`;
+  REGISTRY = { sites: {}, skipped: [], file: 'startup failed' };
+  server.listen(PORT, HOST, () => audit({ event: 'boot_error', port: PORT, error: CONFIG_ERROR }));
 });
 
-module.exports = { server, TOOLS, callTool, handleRpc };
+module.exports = { server, TOOLS, callTool, handleRpc, initializeRegistry };

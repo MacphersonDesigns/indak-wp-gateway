@@ -1,0 +1,30 @@
+services:
+  database:
+    # MariaDB speaks the MySQL protocol used by Hostinger. Pinning the minor line keeps
+    # local behavior predictable while still receiving patch releases.
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      # LOCAL_* names intentionally do not overlap production DB_* variables. Docker
+      # Compose reads .env automatically, and production credentials must never leak into
+      # a disposable developer container by accident.
+      MARIADB_DATABASE: ${LOCAL_DB_NAME:-indak_gateway}
+      MARIADB_USER: ${LOCAL_DB_USER:-indak_gateway}
+      MARIADB_PASSWORD: ${LOCAL_DB_PASSWORD:-local-development-only}
+      MARIADB_ROOT_PASSWORD: ${LOCAL_DB_ROOT_PASSWORD:-local-root-development-only}
+    ports:
+      # DB_PORT belongs to the deployed application and remains 3306. A separate local
+      # forwarding port avoids collisions with MySQL already installed on a developer Mac.
+      - "${LOCAL_DB_FORWARD_PORT:-3307}:3306"
+    volumes:
+      # Registry data must survive container replacement. This mirrors the durable
+      # database boundary used by Hostinger rather than storing state in the app image.
+      - gateway_database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  gateway_database:

@@ -11,6 +11,7 @@
  */
 
 const PROTOCOL_VERSION = '2025-06-18';
+const { version: VERSION } = require('../package.json');
 
 // Canonical suffixes we need, in preference order.
 const WANTED = {
@@ -27,7 +28,11 @@ class Upstream {
   constructor(site) {
     this.site = site;
     this.url = site.base.replace(/\/$/, '') + site.mcpPath;
-    this.auth = 'Basic ' + Buffer.from(`${site.user}:${site.password}`).toString('base64');
+    // Paired connector sites use a credential that is accepted only on their exact MCP
+    // route. Legacy environment sites retain WordPress Application Password Basic auth.
+    this.auth = site.authType === 'scoped-bearer'
+      ? `Bearer ${site.password}`
+      : 'Basic ' + Buffer.from(`${site.user}:${site.password}`).toString('base64');
     this.sessionId = null;
     this.initialized = false;
     this.toolMap = site.upstreamTools ? { ...site.upstreamTools } : null;
@@ -40,7 +45,7 @@ class Upstream {
       accept: 'application/json, text/event-stream',
       authorization: this.auth,
       'mcp-protocol-version': PROTOCOL_VERSION,
-      'user-agent': 'indak-wp-gateway/1.0',
+      'user-agent': `indak-wp-gateway/${VERSION}`,
     };
     if (this.sessionId) headers['mcp-session-id'] = this.sessionId;
 
@@ -53,7 +58,9 @@ class Upstream {
         headers,
         body: JSON.stringify(body),
         signal: ac.signal,
-        redirect: 'follow',
+        // An MCP endpoint should not redirect. Following redirects while carrying a site
+        // credential could leak it to a different host and would create an SSRF pivot.
+        redirect: 'manual',
       });
     } catch (e) {
       if (e.name === 'AbortError') {
@@ -70,7 +77,14 @@ class Upstream {
     // Notifications return 202 with no body.
     if (res.status === 202) return null;
 
-    const text = await res.text();
+    if (res.status >= 300 && res.status < 400) {
+      throw new UpstreamError(
+        `${this.site.label}: MCP endpoint redirected (HTTP ${res.status}). ` +
+        `Save the final HTTPS endpoint instead of a redirecting URL.`
+      );
+    }
+
+    const text = await readLimitedBody(res, 5 * 1024 * 1024, this.site.label);
 
     if (res.status === 401 || res.status === 403) {
       throw new UpstreamError(
@@ -109,7 +123,7 @@ class Upstream {
         params: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: {},
-          clientInfo: { name: 'indak-wp-gateway', version: '1.0.0' },
+          clientInfo: { name: 'indak-wp-gateway', version: VERSION },
         },
       });
       try {
@@ -169,6 +183,22 @@ class Upstream {
   }
 }
 
+async function readLimitedBody(res, limit, label) {
+  if (!res.body) return '';
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of res.body) {
+    size += chunk.length;
+    if (size > limit) {
+      // Cancel the remaining body so a malicious upstream cannot keep the connection busy.
+      await res.body.cancel().catch(() => {});
+      throw new UpstreamError(`${label}: upstream response exceeded ${limit} bytes.`);
+    }
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 /** Handles both plain JSON and an SSE-framed single response. */
 function parseBody(contentType, text) {
   if (!text) return null;
@@ -202,4 +232,4 @@ function upstreamFor(site) {
   return up;
 }
 
-module.exports = { Upstream, UpstreamError, upstreamFor, parseBody, PROTOCOL_VERSION };
+module.exports = { Upstream, UpstreamError, upstreamFor, parseBody, readLimitedBody, PROTOCOL_VERSION };
