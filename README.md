@@ -318,7 +318,7 @@ keyed digest; MySQL stores only AES-256-GCM ciphertext.
 ### Production database variables
 
 ```text
-DB_HOST=localhost
+DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_NAME=<full Hostinger database name>
 DB_USER=<full Hostinger database user>
@@ -334,6 +334,10 @@ The runner is forward-only and idempotent: applied files are recorded in
 If MySQL is temporarily unavailable, the gateway keeps serving usable `SITES`/JSON entries
 and reports `"database":"degraded"` from `/healthz`. Database-only sites cannot be served
 until MySQL returns; they are never silently routed to another key.
+
+Use `127.0.0.1`, not `localhost`, for this Hostinger Web App. Its Node 22 runtime resolved
+`localhost` to IPv6 `::1`, while the assigned MySQL user accepted the local IPv4 connection.
+This remains internal to the hosting account and does not require enabling Remote MySQL.
 
 ## Legacy manual onboarding fallback
 

@@ -18,6 +18,8 @@ All notable changes to the Indak WP Gateway are documented here.
   authentication, protected settings UI, and interactive service-login blocking.
 - Keyboard-accessible, responsive Site Manager page for creating codes and listing paired sites.
 - Reproducible connector ZIP build with archive-integrity verification.
+- Hostinger production guidance pins `DB_HOST` to IPv4 loopback to avoid an IPv6 MySQL grant
+  mismatch observed in the managed Node 22 runtime.
 - Product requirements for team-manageable WordPress site enrollment.
 - Host-bound, single-use connector pairing protocol.
 - Hostinger MySQL registry schema with AES-256-GCM credential encryption.
