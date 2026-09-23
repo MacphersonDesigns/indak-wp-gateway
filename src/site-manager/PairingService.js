@@ -1,8 +1,21 @@
 'use strict';
 
 const crypto = require('crypto');
-const { normalizeMcpUrl, assertPublicEndpoint, normalizeSiteKey } = require('./EndpointValidator');
+const {
+  normalizeMcpUrl,
+  normalizeSiteInput,
+  connectorSettingsUrl,
+  assertPublicEndpoint,
+  normalizeSiteKey,
+} = require('./EndpointValidator');
+const { managementTokenMatches } = require('./ConnectorAuth');
+const { PairingError } = require('./errors');
 const { Upstream } = require('../upstream');
+
+// WordPress waits up to 45 seconds for a claim and 35 for a status check with verify (see
+// Indak_Gateway_Pairing_Client). This is the total for the whole callback, across every
+// request, so the gateway answers well inside those limits.
+const CALLBACK_TIMEOUT_MS = 20000;
 
 function codeDigest(code, masterKey) {
   const normalized = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -20,6 +33,22 @@ function tokenFingerprint(value, length = 16) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, length);
 }
 
+/** Initialize and list tools against one site with a fresh client, within one total deadline. */
+async function verifyEndpoint(site, timeoutMs = CALLBACK_TIMEOUT_MS) {
+  const upstream = new Upstream({ ...site, upstreamTools: null, timeoutMs }, { deadline: Date.now() + timeoutMs });
+  return upstream._tools();
+}
+
+/** Run a validation step and turn its failure into an explicit 400 refusal. */
+async function refuseOnError(step) {
+  try {
+    return await step();
+  } catch (error) {
+    if (error.status) throw error;
+    throw new PairingError(error.message, 400);
+  }
+}
+
 class PairingService {
   constructor(repository, masterKey, options = {}) {
     this.repository = repository;
@@ -27,10 +56,18 @@ class PairingService {
     this.allowInsecure = Boolean(options.allowInsecure);
     this.allowPrivate = Boolean(options.allowPrivate);
     this.ttlMinutes = Math.min(Math.max(Number(options.ttlMinutes) || 10, 2), 30);
+    this.verify = options.verifyEndpoint || verifyEndpoint;
+    this.onBookkeepingError = options.onBookkeepingError || null;
+  }
+
+  originOf(homeUrl) {
+    return normalizeMcpUrl(String(homeUrl || '').replace(/\/$/, '') + '/placeholder', {
+      allowInsecure: this.allowInsecure,
+    }).origin;
   }
 
   async createPairing(input, actorToken) {
-    const endpoint = normalizeMcpUrl(input.mcp_url, { allowInsecure: this.allowInsecure });
+    const endpoint = normalizeSiteInput(input.mcp_url, { allowInsecure: this.allowInsecure });
     await assertPublicEndpoint(endpoint, { allowPrivate: this.allowPrivate });
     const key = normalizeSiteKey(input.site_key);
     const label = String(input.label || '').trim();
@@ -39,6 +76,10 @@ class PairingService {
       : input.environment === 'staging' ? 'staging'
       : null;
     if (!environment) throw new Error('environment must be "staging" or "live".');
+
+    // Surface key and endpoint conflicts now instead of after the WordPress admin has used
+    // the code. The claim repeats this check inside a locking transaction.
+    const replaces = await this.repository.previewPairing(key, endpoint.origin, endpoint.mcpPath);
 
     const code = createDisplayCode();
     const pairing = {
@@ -57,19 +98,24 @@ class PairingService {
     await this.repository.insertAuditEvent({
       eventType: 'pairing_code_created', actorType: 'admin',
       actorFingerprint: pairing.actorFingerprint,
-      details: { site_key: key, origin: endpoint.origin, mcp_path: endpoint.mcpPath },
+      details: { site_key: key, origin: endpoint.origin, mcp_path: endpoint.mcpPath, replaces: Boolean(replaces) },
     });
-    return { code, expires_at: pairing.expiresAt.toISOString(), site_key: key, mcp_url: endpoint.url };
+    const settingsUrl = connectorSettingsUrl(endpoint);
+    return {
+      code,
+      expires_at: pairing.expiresAt.toISOString(),
+      site_key: key,
+      label,
+      mcp_url: endpoint.url,
+      replaces,
+      connector_url: settingsUrl,
+      connect_url: `${settingsUrl}&indak_gateway_code=${encodeURIComponent(code)}`,
+    };
   }
 
   async pairingDetails(input) {
-    const home = normalizeMcpUrl(String(input.home_url || '').replace(/\/$/, '') + '/placeholder', {
-      allowInsecure: this.allowInsecure,
-    });
-    const pairing = await this.repository.inspectPairingCode(
-      codeDigest(input.code, this.masterKey),
-      home.origin
-    );
+    const origin = await refuseOnError(() => this.originOf(input.home_url));
+    const pairing = await this.repository.inspectPairingCode(codeDigest(input.code, this.masterKey), origin);
     return {
       site_key: pairing.siteKey,
       label: pairing.label,
@@ -78,16 +124,23 @@ class PairingService {
     };
   }
 
+  /**
+   * Answer statuses matter here. A 4xx tells WordPress the pairing was refused, so it discards
+   * the credential it offered; a 5xx means the outcome is unknown, so it keeps the credential
+   * pending and can ask /connector/status later. Only definite refusals may be 4xx.
+   */
   async claimPairing(input) {
-    const endpoint = normalizeMcpUrl(input.mcp_url, { allowInsecure: this.allowInsecure });
-    await assertPublicEndpoint(endpoint, { allowPrivate: this.allowPrivate });
-    const home = normalizeMcpUrl(String(input.home_url || '').replace(/\/$/, '') + '/placeholder', {
-      allowInsecure: this.allowInsecure,
+    const endpoint = await refuseOnError(async () => {
+      const normalized = normalizeMcpUrl(input.mcp_url, { allowInsecure: this.allowInsecure });
+      await assertPublicEndpoint(normalized, { allowPrivate: this.allowPrivate });
+      if (this.originOf(input.home_url) !== normalized.origin) {
+        throw new Error('home_url and mcp_url must have the same origin.');
+      }
+      return normalized;
     });
-    if (home.origin !== endpoint.origin) throw new Error('home_url and mcp_url must have the same origin.');
     const credential = String(input.credential || '');
     if (credential.length < 43 || credential.length > 256) {
-      throw new Error('Connector credential must contain 256 bits of random data.');
+      throw new PairingError('Connector credential must contain 256 bits of random data.');
     }
 
     // Consumption is atomic and happens before the callback. A code cannot be reused as an
@@ -110,22 +163,153 @@ class PairingService {
       authType: 'scoped-bearer',
     };
 
-    const upstream = new Upstream(site);
-    const toolMap = await upstream._tools();
-    site.upstreamTools = toolMap;
-    await this.repository.insertActiveSite(site, credential);
-    await this.repository.insertAuditEvent({
-      eventType: 'site_paired', siteId: site.id, actorType: 'connector',
-      actorFingerprint: tokenFingerprint(credential),
-      details: { site_key: site.key, connector_version: String(input.connector_version || 'unknown') },
-    });
+    try {
+      site.upstreamTools = await this.verify(site);
+    } catch (error) {
+      // The code is consumed and nothing was stored, so this is a definite refusal.
+      throw new PairingError(
+        `The gateway could not reach this site's Novamira endpoint with the new credential ` +
+        `(${error.message}). Create a new pairing code and try again.`
+      );
+    }
+    let stored;
+    try {
+      stored = await this.repository.upsertPairedSite(site, credential);
+    } catch (error) {
+      if (error.status) throw error;
+      // The commit may or may not have happened; WordPress should keep the credential pending.
+      throw new PairingError('The gateway could not confirm that it saved this connection. Choose Check connection.', 503);
+    }
+    site.id = stored.id;
+    const connectorVersion = String(input.connector_version || 'unknown').slice(0, 32);
+    // The pairing is committed. Bookkeeping failures below must not turn it into an error,
+    // or WordPress would discard a credential the gateway has already activated.
+    try {
+      await this.repository.recordConnectorVersion(site.id, connectorVersion);
+      await this.repository.insertAuditEvent({
+        eventType: stored.replaced ? 'site_repaired' : 'site_paired',
+        siteId: site.id, actorType: 'connector',
+        actorFingerprint: tokenFingerprint(credential),
+        details: {
+          site_key: site.key,
+          connector_version: connectorVersion,
+          ...(stored.replaced ? { replaced_status: stored.replaced.status } : {}),
+        },
+      });
+    } catch (error) {
+      this.onBookkeepingError?.(error, site.key);
+    }
     return {
-      result: { connected: true, site_key: site.key, label: site.label, environment: site.env },
-      // Kept in process memory only so the newly paired site is immediately routable without
-      // restarting Hostinger. HTTP handlers must serialize result, never runtimeSite.
-      runtimeSite: { ...site },
+      result: {
+        connected: true,
+        site_key: site.key,
+        label: site.label,
+        environment: site.env,
+        // Only an active connection counts as replaced; re-pairing after a disconnect or
+        // removal is a fresh connection from the team's point of view.
+        replaced: stored.replaced?.status === 'active',
+      },
+      siteId: site.id,
     };
+  }
+
+  /**
+   * Authenticate a connector's management call. Every failure looks the same to the caller
+   * so the endpoint cannot be used to probe which sites are paired.
+   */
+  async authenticateConnector(input, presentedToken) {
+    const denied = new PairingError('This site is not connected to the gateway.', 404);
+    let key;
+    let origin;
+    try {
+      key = normalizeSiteKey(input.site_key);
+      origin = this.originOf(input.home_url);
+    } catch {
+      throw denied;
+    }
+    const site = await this.repository.activeSiteByKey(key);
+    if (!site || site.base !== origin || !managementTokenMatches(site.password, presentedToken)) {
+      throw denied;
+    }
+    return site;
+  }
+
+  async connectorStatus(input, presentedToken) {
+    const site = await this.authenticateConnector(input, presentedToken);
+    if (input.connector_version) {
+      await this.repository.recordConnectorVersion(site.id, input.connector_version);
+    }
+    let check = null;
+    if (input.verify === true) {
+      try {
+        const tools = await this.verify(site);
+        await this.repository.recordCheck(site.id, { ok: true, upstreamTools: tools });
+        check = { ok: true };
+      } catch (error) {
+        await this.repository.recordCheck(site.id, { ok: false, error: error.message });
+        check = { ok: false, error: error.message };
+      }
+    }
+    const summary = await this.repository.siteSummaryByKey(site.key);
+    return {
+      connected: true,
+      site_key: site.key,
+      label: site.label,
+      environment: site.env,
+      writes: site.writes,
+      last_verified_at: summary?.last_verified_at || null,
+      last_error: summary?.last_error || null,
+      check,
+    };
+  }
+
+  async connectorDisconnect(input, presentedToken) {
+    const site = await this.authenticateConnector(input, presentedToken);
+    await this.repository.disableSite(site.id, 'Disconnected from WordPress.');
+    await this.repository.insertAuditEvent({
+      eventType: 'site_disconnected', siteId: site.id, actorType: 'connector',
+      actorFingerprint: tokenFingerprint(site.password),
+      details: { site_key: site.key, connector_version: String(input.connector_version || 'unknown').slice(0, 32) },
+    });
+    return { disconnected: true, site_key: site.key };
+  }
+
+  async adminRemove(siteKey, actorToken) {
+    const key = normalizeSiteKey(siteKey);
+    const summary = await this.repository.siteSummaryByKey(key);
+    if (!summary) throw new PairingError(`No paired site uses the key "${key}".`, 404);
+    const changed = await this.repository.disableSite(summary.id, 'Removed in the Site Manager.');
+    if (changed) {
+      await this.repository.insertAuditEvent({
+        eventType: 'site_removed', siteId: summary.id, actorType: 'admin',
+        actorFingerprint: tokenFingerprint(actorToken),
+        details: { site_key: key },
+      });
+    }
+    return { removed: true, site_key: key, already_removed: !changed };
+  }
+
+  async adminVerify(siteKey) {
+    const key = normalizeSiteKey(siteKey);
+    const site = await this.repository.activeSiteByKey(key);
+    if (!site) throw new PairingError(`"${key}" is not an active paired site. Re-pair it first.`, 404);
+    try {
+      const tools = await this.verify(site);
+      await this.repository.recordCheck(site.id, { ok: true, upstreamTools: tools });
+      return { ok: true, site_key: key };
+    } catch (error) {
+      await this.repository.recordCheck(site.id, { ok: false, error: error.message });
+      return { ok: false, site_key: key, error: error.message };
+    }
   }
 }
 
-module.exports = { PairingService, codeDigest, createDisplayCode, tokenFingerprint };
+module.exports = {
+  PairingService,
+  PairingError,
+  CALLBACK_TIMEOUT_MS,
+  codeDigest,
+  createDisplayCode,
+  tokenFingerprint,
+  verifyEndpoint,
+};

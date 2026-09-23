@@ -10,6 +10,10 @@ decisions.
 - `Database.js`: creates a small, bounded MySQL pool.
 - `SiteRepository.js`: parameterized persistence and row-to-runtime conversion.
 - `RegistryMerge.js`: combines paired sites with the legacy environment fallback.
+- `PairingService.js`: pairing codes, claims, connector status/disconnect, test, and remove.
+- `ConnectorAuth.js`: the management token shared with the WordPress connector.
+- `ConnectorRelease.js`: the cached connector release feed for self-updates.
+- `Migrations.js`: forward-only migrations, run at startup and by `npm run db:migrate`.
 
 ## Local verification
 

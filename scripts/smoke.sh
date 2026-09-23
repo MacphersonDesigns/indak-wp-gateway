@@ -55,6 +55,19 @@ printf '%s' "$w" | grep -qi 'refus\|disabled\|LIVE' && ok "execute-php refused o
 t=$(rpc '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"wp_discover_abilities","arguments":{"site":"strengthend"}}}')
 printf '%s' "$t" | grep -qi 'unknown site' && ok "typo'd site key refused, not silently routed" || no "typo was not caught: $(printf '%s' "$t" | head -c 300)"
 
+echo "== site manager and connector endpoints (1.2.0)"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -m 20 "${GATEWAY%/}/admin/sites")
+[ "$code" = "401" ] && ok "Site Manager API requires the admin token (401)" || no "/admin/sites without a token got HTTP $code, expected 401"
+st=$(curl -sS -m 20 -X POST "${GATEWAY%/}/connector/status" -H 'Content-Type: application/json' \
+  -d '{"site_key":"smoke-test-unknown","home_url":"https://example.invalid"}')
+printf '%s' "$st" | grep -q 'not connected' && ok "connector status refuses unknown sites uniformly" || no "connector status returned: $(printf '%s' "$st" | head -c 300)"
+rel_code=$(curl -sS -o /dev/null -w '%{http_code}' -m 30 "${GATEWAY%/}/connector/release")
+case "$rel_code" in
+  200) ok "connector release feed answers (HTTP 200)";;
+  404) ok "connector release feed answers (HTTP 404: no connector-v* release published yet)";;
+  *) no "connector release feed returned HTTP $rel_code";;
+esac
+
 if [ -n "${TOKEN_READONLY:-}" ]; then
   r=$(curl -sS -m 60 -X POST "$MCP" -H "Authorization: Bearer $TOKEN_READONLY" -H 'Content-Type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"wp_execute_ability\",\"arguments\":{\"site\":\"$SITE_B\",\"ability_name\":\"novamira/execute-php\",\"parameters\":{}}}}")

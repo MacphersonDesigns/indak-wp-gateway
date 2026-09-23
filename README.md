@@ -59,11 +59,14 @@ DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=indak_gateway \
   DB_USER=indak_gateway DB_PASSWORD=local-development-only npm run selftest:site-manager
 DB_HOST=127.0.0.1 DB_PORT=3307 DB_NAME=indak_gateway \
   DB_USER=indak_gateway DB_PASSWORD=local-development-only npm run selftest:pairing
+npm run selftest:upstream
 npm run selftest:connector
 ```
 
-Green means 22 gateway checks, 8 encrypted-registry checks, 7 pairing checks, seven PHP
-syntax checks, and six connector credential checks. Docker stores MariaDB data in the named
+Green means 25 gateway checks, 9 encrypted-registry checks, 37 pairing lifecycle checks,
+15 upstream recovery checks, eight PHP syntax checks, and 20 connector credential checks.
+`node scripts/gateway-lifecycle-selftest.js` (23 checks) exercises the running gateway's HTTP
+API against MariaDB with the same `DB_*` variables. Docker stores MariaDB data in the named
 `gateway_database` volume, so container replacement does not erase paired sites.
 
 ### 1. Prove it works on your laptop, with no WordPress at all
@@ -296,24 +299,42 @@ already does.
 
 ## Pairing a site through Site Manager
 
-This is the normal workflow for the 40+ site fleet. It requires no Hostinger environment
-edit and no gateway redeployment after the one-time database setup.
+This is the normal workflow for the fleet. It needs no Hostinger environment edit and no
+gateway redeploy after the one-time database setup.
 
-1. Visit `https://<gateway-host>/admin`.
-2. Enter `GATEWAY_ADMIN_TOKEN`. It is kept in browser `sessionStorage`, not persistent local
-   storage.
-3. Paste the site's complete Novamira URL, for example
-   `https://stage.tgy.indakmediahosting.com/divi/wp-json/mcp/novamira`.
-4. Enter a stable key and label, choose staging or live, and create a pairing code.
-5. Install the ZIP built from `wordpress/indak-gateway-connector` beside Novamira.
-6. In WordPress, open Settings > Indak Gateway, paste the one-time code, and connect.
-7. Refresh Site Manager and confirm the site is active.
-8. Call `wp_list_sites`, then discover abilities on the new site and an existing site in the
-   same ClickUp Brain conversation.
+1. Install the Indak Gateway Connector beside Novamira: the Partnership Program installer
+   does it, or upload `indak-gateway-connector.zip` from the latest `connector-v*` GitHub
+   release. After 0.2.0, the connector updates itself through WordPress updates.
+2. Visit `https://gateway.indakmedia.com/admin` and enter `GATEWAY_ADMIN_TOKEN`. It is kept in
+   the tab's `sessionStorage` and cleared when the tab closes.
+3. Enter the site's URL (for example `https://stage.tgy.indakmediahosting.com/divi`; the
+   gateway adds `/wp-json/mcp/novamira`), a stable key, a team-facing label, and staging or
+   live. Create the pairing code.
+4. Choose **Open the connector on …**. It opens Settings > Indak Gateway on the site with the
+   code filled in. Choose **Connect to Indak Gateway**. (Or paste the code there yourself.)
+5. The site shows as Active in the Site Manager. Call `wp_list_sites`, then discover abilities
+   on the new site in ClickUp Brain.
 
-Pairing codes expire after ten minutes, work once, and are bound to the exact HTTPS origin
-and MCP path. Each connector creates a different 256-bit credential. WordPress stores only a
-keyed digest; MySQL stores only AES-256-GCM ciphertext.
+Pairing codes expire after ten minutes, work once, and are bound to the exact origin and MCP
+path. Each connector creates its own 256-bit credential. WordPress stores only a one-way
+digest; MySQL stores only AES-256-GCM ciphertext.
+
+### When a site stops working
+
+The Site Manager's Status and Last check columns show failures from real ClickUp traffic, not
+only from tests. Nothing here needs a database edit.
+
+| What you see | What to do |
+|---|---|
+| `WordPress rejected the gateway credential` | Someone disconnected the site in WordPress, or the connector is inactive. Choose **Pair again**, then connect with the new code. The old record is replaced. |
+| `no MCP endpoint at …` | Novamira is inactive, its AI abilities are off, or the site moved. Fix Novamira, then **Test**. If the URL changed, **Remove** and pair the new URL. |
+| `could not be reached` / `timed out` | The site or its host is down. **Test** again later. |
+| Status Removed | The site was disconnected in WordPress or removed here. **Pair again** to reconnect. |
+| WordPress says "Connection not confirmed" | Choose **Check connection**. If the pairing did not complete, choose **Start over** with a new code. |
+| WordPress says "Connection problem" | The gateway no longer routes to the site. Disconnect it in WordPress, then pair again. If it says the site's address changed, remove the old entry in the Site Manager first. |
+| WordPress says a user named indak-gateway-bot already exists | Someone else created that account, so the connector will not make it an administrator. Delete or rename that user, then connect again. |
+
+Expired Novamira sessions (after 4 hours idle) and renamed adapter tools recover on their own.
 
 ### Production database variables
 
@@ -325,15 +346,25 @@ DB_USER=<full Hostinger database user>
 DB_PASSWORD=<unique database password>
 GATEWAY_ADMIN_TOKEN=<64 hex characters>
 REGISTRY_ENCRYPTION_KEY=<64 hex characters>
+TRUST_PROXY_HOPS=1
 ```
 
-Run `node scripts/migrate.js` once per deployment containing a new file under `migrations/`.
-The runner is forward-only and idempotent: applied files are recorded in
-`schema_migrations` and skipped on the next run.
+`TRUST_PROXY_HOPS=1` tells the gateway that Hostinger's proxy sits in front of it, so rate
+limits apply per real client instead of to everyone at once.
 
-If MySQL is temporarily unavailable, the gateway keeps serving usable `SITES`/JSON entries
-and reports `"database":"degraded"` from `/healthz`. Database-only sites cannot be served
-until MySQL returns; they are never silently routed to another key.
+Pending files under `migrations/` are applied when the gateway starts, so a normal redeploy is
+enough. Set `DB_AUTO_MIGRATE=false` to run `node scripts/migrate.js` by hand instead. The
+runner is forward-only and idempotent: applied files are recorded in `schema_migrations` and
+skipped on the next run.
+
+Never change `REGISTRY_ENCRYPTION_KEY` once sites are paired: every stored credential is
+encrypted with it. If it changes, the Site Manager flags each site as unloadable and every
+site must be paired again.
+
+If MySQL is unavailable at startup, the gateway keeps serving usable `SITES`/JSON entries,
+reports `"database":"degraded"` from `/healthz`, and keeps retrying (15 seconds, backing off
+to 5 minutes). Paired sites return as soon as MySQL does, without a restart; they are never
+silently routed to another key. Once connected, paired sites are re-read every 5 minutes.
 
 Use `127.0.0.1`, not `localhost`, for this Hostinger Web App. Its Node 22 runtime resolved
 `localhost` to IPv6 `::1`, while the assigned MySQL user accepted the local IPv4 connection.
@@ -418,7 +449,7 @@ src/registry.js   registry.json loader and validator
 src/guard.js      read/write classification and the root-ability list
 src/site-manager/ encrypted MySQL registry, endpoint validation and pairing service
 public/admin/     protected Site Manager browser interface
-wordpress/indak-gateway-connector/  route-scoped WordPress companion plugin
+wordpress/indak-gateway-connector/  route-scoped WordPress companion plugin (self-updating)
 migrations/       forward-only Hostinger MySQL schema files
 scripts/selftest.js  offline end-to-end test with two fake WordPress installs
 scripts/smoke.sh     verify a deployed gateway
@@ -450,6 +481,7 @@ in `registry.json` if you ever need to.
 
 - The gateway is stateless: no `Mcp-Session-Id`, any replica serves any request, so it
   scales and redeploys without sticky sessions.
-- Upstream WordPress sessions are cached per site and retried once if they go stale.
+- Upstream WordPress sessions are cached per site, renewed after 3 hours idle, and replaced
+  and retried once if Novamira has ended them.
 - Everything the gateway writes to stdout is one JSON object per line. Ship it somewhere
   before you need it: when a client site breaks at 11pm you will want this.

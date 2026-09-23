@@ -10,8 +10,12 @@
 | Encrypted database registry | Complete locally | 8-check persistence and fallback suite |
 | One-time host-bound pairing codes | Complete locally | 7-check callback and replay suite |
 | Protected Site Manager API | Complete locally | 401/200 authorization smoke check |
-| Accessible Site Manager UI | Automated checks pending | Manual markup and keyboard-oriented implementation |
-| WordPress connector plugin | Complete locally | PHP lint + credential self-test; real WP pairing pending |
-| Credential rotation/disconnection | Pending | Old-token and cross-site rejection tests |
+| Accessible Site Manager UI | Complete locally; screen reader pass pending | Accessibility-lead reviewed markup, focus, and live regions |
+| WordPress connector plugin | Complete | PHP lint, 20 credential checks, real WordPress + Novamira pairing |
+| Dispatched-route credential scoping | Complete | Playground: `?rest_route=`, form body, other routes, front end all refused |
+| Re-pair in place, remove, disconnect from WordPress | Complete | 33-check pairing suite + HTTP lifecycle suite + real WordPress |
+| Upstream session and tool-name recovery | Complete | `selftest:upstream` + real Novamira session wipe |
+| Database retry and periodic refresh | Complete | Code review; manual outage test pending |
+| Connector self-update | Complete | Update URI offer, digest and package checks in real WordPress; first real release pending |
 | Environment registry migration | Pending | Idempotent import test |
 | Two real sites in one Brain conversation | Pending manual release check | ClickUp Brain MAX |

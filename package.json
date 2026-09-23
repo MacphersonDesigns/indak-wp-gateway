@@ -1,6 +1,6 @@
 {
   "name": "indak-wp-gateway",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "One MCP endpoint fronting every Indak-managed WordPress site running Novamira.",
   "main": "src/server.js",
@@ -15,6 +15,7 @@
     "db:migrate": "node scripts/migrate.js",
     "selftest:site-manager": "node scripts/site-manager-selftest.js",
     "selftest:pairing": "node scripts/pairing-selftest.js",
+    "selftest:upstream": "node scripts/upstream-selftest.js",
     "selftest:connector": "bash scripts/connector-lint.sh && php scripts/connector-credential-selftest.php",
     "build:connector": "bash scripts/build-connector.sh",
     "smoke": "bash scripts/smoke.sh",

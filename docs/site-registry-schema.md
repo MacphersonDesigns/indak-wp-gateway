@@ -75,15 +75,26 @@ under paths such as `/divi` and `/oxygen` on the same host.
 Audit inserts must never contain pairing codes, bearer tokens, database passwords, plaintext
 site credentials, ciphertext fields, request authorization headers, or raw exception dumps.
 
-## Registry precedence during migration
+## Registry precedence
 
-1. Load usable environment/file registry entries as today.
-2. Load active database entries.
-3. Reject duplicate keys that disagree on endpoint; never silently choose one.
-4. For an exact matching key and endpoint, the database row becomes authoritative after a
-   successful import marker is recorded.
-5. If MySQL is unavailable, continue serving environment entries and report degraded database
-   status on health diagnostics.
+1. Load usable environment/file registry entries at boot.
+2. Load active database entries at boot, after every pairing change, and every five minutes.
+3. When both use the same key, the paired (database) site wins. If the endpoints differ, the
+   stale environment entry is reported on the status page for removal.
+4. If MySQL is unavailable, continue serving environment entries, report degraded database
+   status on health diagnostics, and retry with backoff. A failed refresh keeps the last
+   loaded database sites routable.
+
+## Lifecycle
+
+- **Pairing** inserts an `active` row, or replaces the existing row for the same key and
+  endpoint (see `docs/pairing-protocol.md`).
+- **Remove** (Site Manager) and **disconnect** (WordPress) set `status = 'disabled'`, null the
+  credential columns and fingerprint, and record the reason in `last_error`.
+- `last_verified_at` and `last_error` are updated by tests, connector status checks, and real
+  tool calls (throttled to one write per site per minute while failing).
+- `connector_version` (migration 002) records the connector release reported at pairing and
+  on status checks.
 
 ## Encryption contract
 
