@@ -94,10 +94,12 @@ flowchart LR
 | Root and health | Public GET | Internet → gateway | Must not list sites or secrets | `src/server.js` / HTTP handler |
 | Upstream fetch | Tool call | Gateway → WordPress | URL and credential are security-critical | `src/upstream.js` / `Upstream._post` |
 | Registry parsing | Environment/file | Operator → gateway | Current migration fallback | `src/registry.js` / `loadRegistry` |
-| Pairing claim | Planned public POST | Connector → gateway | Code replay and origin binding | `docs/pairing-protocol.md` |
-| Site Manager | Planned admin routes | Manager → gateway | Separate authorization required | `docs/prd.md` |
+| Pairing claim | Public POST `/pairings/*` | Connector → gateway | Code replay and origin binding | `src/site-manager/PairingService.js` |
+| Connector management | Public POST `/connector/status`, `/connector/disconnect` | Connector → gateway | Derived management token, uniform 404, per-IP limit | `src/site-manager/ConnectorAuth.js` |
+| Connector release feed | Public GET `/connector/release` | Gateway → client sites | Must not be able to redirect sites to other code | `src/site-manager/ConnectorRelease.js`, `includes/class-updater.php` |
+| Site Manager | `/admin/*` with `GATEWAY_ADMIN_TOKEN` | Manager → gateway | Pair, test, remove | `src/server.js` |
 | MySQL repository | Internal runtime | Gateway → database | Parameterization and encryption required | `docs/site-registry-schema.md` |
-| Connector auth hook | WordPress REST request | Gateway → connector | Must apply only to exact MCP route | `docs/pairing-protocol.md` |
+| Connector auth hook | WordPress REST request | Gateway → connector | Must apply only to the dispatched MCP route; 0.1.0 checked only the URL path and was bypassable with `rest_route` | `includes/class-authenticator.php` |
 
 ## Top abuse paths
 
@@ -122,6 +124,8 @@ flowchart LR
 | TM-005 | Database/platform attacker | Read MySQL, possibly environment separately | Decrypt fleet credentials | Fleet-wide compromise | All site credentials | Environment secrets and planned AES-GCM | Key and ciphertext coexist in one runtime | Separate key from DB; authenticated AAD; rotation version; never log plaintext | Decryption-failure and bulk-read anomaly alerts | Low | High | High |
 | TM-006 | Compromised upstream | Paired site controls MCP response | Return misleading tools or oversized payloads | Confused routing or resource exhaustion | Gateway integrity/availability | Suffix discovery (`src/upstream.js`), body request limit (`src/server.js`) | Upstream response size is not bounded | Limit response bytes; require exactly one match per slot; cache verified mapping | Audit mapping changes and oversize responses | Medium | Medium | Medium |
 | TM-007 | Authorized ClickUp user | Full gateway token | Invoke root/write ability on live | Client-site code execution | Live site integrity | Default-deny, writes flag, live-root block (`src/guard.js`, `src/server.js`) | Shared caller identity | Preserve refusal ordering; immutable live default; later per-person identity | Existing JSON deny audit; alert on repeated live-root attempts | Medium | High | High |
+| TM-009 | Gateway or GitHub-account compromise | Control of the release feed or repository | Push malicious connector code to every paired site | Fleet-wide code execution | All client sites | Package URL fixed to this repository and version; SHA-256 digest checked; auto-update is opt-in per site; release workflow uses only SHA-pinned GitHub actions and a separate publish-only job | A compromised GitHub account can still publish a release | Protect the repository with 2FA and tag protection; consider signing releases with a key embedded in the connector | Alert on new `connector-v*` releases | Low | High | Medium |
+| TM-010 | Site visitor with registration rights | Open registration on a client site | Register the service account's public name before pairing so it is promoted | Administrator on that site | That site | Connector only uses an account it created (by ID); refuses foreign accounts; email/username login, resets, and Application Passwords blocked | Sites paired with 0.1.0 before this fix may already have been affected | Review `indak-gateway-bot` accounts on sites with open registration | Audit administrator accounts | Low | High | Medium |
 | TM-008 | Remote attacker | Public pairing/admin endpoints | Flood expensive validation/database operations | Gateway outage | Availability | Existing per-site tool limiter (`src/server.js`) | No enrollment-specific limiter yet | IP and code buckets, concurrency cap, request size limit, bounded DB pool | Rate-limit and pool-saturation metrics | Medium | Medium | Medium |
 
 ## Criticality calibration
@@ -144,7 +148,7 @@ flowchart LR
 | `src/registry.js` | Endpoint normalization and fallback precedence | TM-003, TM-007 |
 | `src/guard.js` | Final live/write authorization decision | TM-007 |
 | `src/site-manager/` | Planned enrollment, encryption, and database boundary | TM-002–TM-005, TM-008 |
-| `wordpress/indak-gateway-connector/` | Planned scoped authentication inside WordPress | TM-001, TM-002 |
+| `wordpress/indak-gateway-connector/` | Dispatched-route authentication, management token, verified self-update | TM-001, TM-002, TM-009 |
 | `scripts/selftest.js` | Required regression coverage for routing and refusals | TM-001, TM-007 |
 
 ## Quality check

@@ -11,38 +11,43 @@
     <header class="masthead">
       <p class="eyebrow">Indak Media</p>
       <h1>WordPress Site Manager</h1>
-      <p class="lede">Create a one-time code, then paste it into Settings → Indak Gateway on the WordPress site.</p>
+      <p class="lede">Create a one-time code, then open the connector on the WordPress site and choose Connect.</p>
     </header>
 
     <section class="panel" aria-labelledby="access-heading">
       <h2 id="access-heading">Manager access</h2>
-      <div class="field-row">
+      <form id="access-form" class="field-row">
         <label for="admin-token">Gateway admin token</label>
-        <input id="admin-token" type="password" autocomplete="current-password" spellcheck="false">
-        <button id="load-sites" type="button">Open Site Manager</button>
-      </div>
-      <p class="hint">The token stays in this browser tab only and is never saved by the page.</p>
+        <input id="admin-token" type="password" required autocomplete="current-password" spellcheck="false" aria-describedby="admin-token-hint">
+        <button id="load-sites" type="submit">Open Site Manager</button>
+        <p id="admin-token-hint" class="hint">Kept only in this browser tab's session storage and cleared when the tab closes.</p>
+      </form>
     </section>
 
-    <div id="status" class="status" role="status" aria-live="polite"></div>
+    <div class="status-area">
+      <div id="status" class="status" role="status"></div>
+      <div id="alert" class="status error" role="alert"></div>
+    </div>
 
     <section id="manager" class="manager" hidden>
       <section class="panel" aria-labelledby="add-heading">
-        <h2 id="add-heading">Add a WordPress site</h2>
+        <h2 id="add-heading">Add or reconnect a WordPress site</h2>
         <form id="pairing-form">
           <div class="grid">
             <div class="field full">
-              <label for="mcp-url">Complete Novamira MCP URL</label>
-              <input id="mcp-url" name="mcp_url" type="url" required placeholder="https://stage.example.com/divi/wp-json/mcp/novamira">
-              <p class="hint">Paste the complete URL. Subdirectories such as <code>/divi</code> are supported.</p>
+              <label for="mcp-url">WordPress site URL or Novamira MCP URL</label>
+              <input id="mcp-url" name="mcp_url" type="url" required autocomplete="off" spellcheck="false" aria-describedby="mcp-url-hint">
+              <p id="mcp-url-hint" class="hint">Start with https://, for example <code>https://example.com</code> or <code>https://example.com/subdir</code>. We add <code>/wp-json/mcp/novamira</code> for you. A full Novamira MCP URL also works.</p>
             </div>
             <div class="field">
               <label for="site-key">Site key</label>
-              <input id="site-key" name="site_key" required pattern="[a-z0-9][a-z0-9-]{0,79}" placeholder="trilogy-divi">
+              <input id="site-key" name="site_key" required pattern="[a-z0-9][a-z0-9\-]{0,79}" autocomplete="off" spellcheck="false" aria-describedby="site-key-hint">
+              <p id="site-key-hint" class="hint">Lowercase letters, numbers and hyphens, up to 80 characters. Start with a letter or number. Reuse a site's key to reconnect it.</p>
             </div>
             <div class="field">
               <label for="label">Team-facing label</label>
-              <input id="label" name="label" required maxlength="180" placeholder="Trilogy Divi conversion">
+              <input id="label" name="label" required maxlength="180" autocomplete="off" aria-describedby="label-hint">
+              <p id="label-hint" class="hint">What the team sees in ClickUp, for example Trilogy (staging).</p>
             </div>
             <div class="field">
               <label for="environment">Environment</label>
@@ -52,36 +57,63 @@
               </select>
             </div>
             <div class="field checkbox-field">
-              <label><input id="writes" name="writes" type="checkbox" checked> Allow write abilities</label>
-              <p class="hint">Always forced off for live sites.</p>
+              <label><input id="writes" name="writes" type="checkbox" checked aria-describedby="writes-hint"> Allow write abilities</label>
+              <p id="writes-hint" class="hint">Always forced off for live sites.</p>
             </div>
           </div>
-          <button type="submit">Create pairing code</button>
+          <button id="create-code" type="submit"><span class="btn-text">Create pairing code</span></button>
         </form>
 
-        <div id="pairing-result" class="pairing-result" hidden tabindex="-1">
-          <h3>Pairing code</h3>
-          <output id="pairing-code"></output>
+        <div id="pairing-result" class="pairing-result" hidden>
+          <h3 id="pairing-heading" tabindex="-1">Pairing code for <span id="pairing-site-label"></span></h3>
+          <p id="pairing-replaces" class="pairing-note" hidden>
+            <span aria-hidden="true">!</span> <strong>Note:</strong> This will replace the existing connection for <span id="pairing-replaces-label"></span>.
+          </p>
+          <p><code id="pairing-code" class="pairing-code"></code></p>
           <p id="pairing-expiry"></p>
-          <button id="copy-code" type="button">Copy code</button>
+          <p>Next, open the connector on the site, check that the code matches, and choose Connect to Indak Gateway.</p>
+          <p><a id="connector-link" target="_blank" rel="noopener noreferrer">Open the connector on <span id="connector-host"></span> <span class="new-tab-note">(opens in a new tab)</span></a></p>
+          <div class="button-row">
+            <button id="copy-code" type="button"><span class="btn-text">Copy code</span></button>
+            <button id="copy-link" type="button" class="secondary"><span class="btn-text">Copy connect link</span></button>
+          </div>
         </div>
       </section>
 
       <section class="panel" aria-labelledby="sites-heading">
         <div class="section-heading">
-          <h2 id="sites-heading">Paired sites</h2>
-          <button id="refresh-sites" class="secondary" type="button">Refresh</button>
+          <h2 id="sites-heading" tabindex="-1">Paired sites</h2>
+          <button id="refresh-sites" class="secondary" type="button"><span class="btn-text">Refresh sites</span></button>
         </div>
-        <div class="table-scroll" tabindex="0" aria-label="Paired sites table">
+        <div id="sites-table" class="table-scroll" role="group" tabindex="0" aria-labelledby="sites-caption">
           <table>
-            <caption class="screen-reader-text">WordPress sites paired through the database registry</caption>
-            <thead><tr><th>Site</th><th>Environment</th><th>Status</th><th>MCP URL</th><th>Verified</th></tr></thead>
+            <caption id="sites-caption" class="screen-reader-text">Paired WordPress sites</caption>
+            <thead>
+              <tr>
+                <th scope="col">Site</th>
+                <th scope="col">Environment</th>
+                <th scope="col">Status</th>
+                <th scope="col">Connector version</th>
+                <th scope="col">Last check</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
             <tbody id="sites-body"></tbody>
           </table>
         </div>
-        <p id="empty-sites" class="empty">No database-paired sites yet.</p>
+        <p id="empty-sites" class="empty" hidden>No sites are paired yet. Create a pairing code above to add the first one.</p>
       </section>
     </section>
+
+    <dialog id="remove-dialog" class="confirm-dialog" role="alertdialog" aria-labelledby="remove-dialog-title" aria-describedby="remove-dialog-desc">
+      <h2 id="remove-dialog-title">Remove <span id="remove-dialog-site"></span>?</h2>
+      <p id="remove-dialog-desc">The gateway stops connecting to this site right away and erases its stored credential. The site stays in the list as Removed, and you can pair it again later with a new code.</p>
+      <p id="remove-dialog-error" class="dialog-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button type="button" id="remove-cancel" class="secondary" autofocus>Cancel</button>
+        <button type="button" id="remove-confirm" class="danger-solid"><span class="btn-text">Remove site</span></button>
+      </div>
+    </dialog>
   </main>
   <script src="/admin/admin.js" defer></script>
 </body>

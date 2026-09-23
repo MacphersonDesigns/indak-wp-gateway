@@ -24,6 +24,34 @@ function normalizeMcpUrl(input, { allowInsecure = false } = {}) {
   };
 }
 
+const DEFAULT_NOVAMIRA_PATH = '/wp-json/mcp/novamira';
+
+/**
+ * Team members usually know the site address, not the Novamira route. A bare site URL (or a
+ * subdirectory install such as https://stage.example.com/divi) gets the standard Novamira path
+ * appended; anything already pointing into the REST API is kept exactly as entered.
+ */
+function normalizeSiteInput(input, options = {}) {
+  let url;
+  try {
+    url = new URL(String(input || '').trim());
+  } catch {
+    throw new Error('Enter the WordPress site URL or its complete Novamira MCP URL.');
+  }
+  const pathname = url.pathname.replace(/\/+$/, '');
+  if (!/\/wp-json(\/|$)/.test(pathname)) {
+    url.pathname = pathname + DEFAULT_NOVAMIRA_PATH;
+  }
+  return normalizeMcpUrl(url.toString(), options);
+}
+
+/** Where the connector's settings page lives, derived from the approved MCP URL. */
+function connectorSettingsUrl(normalized) {
+  const at = normalized.mcpPath.indexOf('/wp-json');
+  const basePath = at > 0 ? normalized.mcpPath.slice(0, at) : '';
+  return `${normalized.origin}${basePath}/wp-admin/options-general.php?page=indak-gateway-connector`;
+}
+
 function privateAddress(address) {
   const family = net.isIP(address);
   if (family === 4) {
@@ -65,4 +93,12 @@ function normalizeSiteKey(input) {
   return key;
 }
 
-module.exports = { normalizeMcpUrl, privateAddress, assertPublicEndpoint, normalizeSiteKey };
+module.exports = {
+  DEFAULT_NOVAMIRA_PATH,
+  normalizeMcpUrl,
+  normalizeSiteInput,
+  connectorSettingsUrl,
+  privateAddress,
+  assertPublicEndpoint,
+  normalizeSiteKey,
+};

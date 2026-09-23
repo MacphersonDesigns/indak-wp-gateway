@@ -9,10 +9,14 @@
   --accent: #8ee0b8;
   --accent-ink: #082117;
   --danger: #ffb4ab;
+  /* 3.4:1 on --panel-strong and 3.9:1 on --panel, so secondary controls keep a visible edge. */
+  --control-line: #6b7f75;
   font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
 }
 
 * { box-sizing: border-box; }
+/* A class that sets display would otherwise beat the hidden attribute. */
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background:
@@ -63,21 +67,55 @@ input, select { width: 100%; border: 1px solid #60736a; background: #0d1210; col
 input[type="checkbox"] { width: 1.2rem; min-height: 1.2rem; accent-color: var(--accent); }
 .checkbox-field { align-content: center; }
 button { border: 0; background: var(--accent); color: var(--accent-ink); padding: .6rem 1rem; font-weight: 800; cursor: pointer; }
-button.secondary { border: 1px solid var(--line); background: var(--panel-strong); color: var(--text); }
+button.secondary { border: 1px solid var(--control-line); background: var(--panel-strong); color: var(--text); }
+button.danger { border: 1px solid var(--danger); background: transparent; color: var(--danger); }
+button.danger-solid { background: var(--danger); color: var(--page); }
 button:hover { filter: brightness(1.08); }
-button:focus-visible, input:focus-visible, select:focus-visible, [tabindex="0"]:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
-.status { min-height: 1.5rem; margin: 1rem 0; color: var(--accent); }
+button[aria-disabled="true"] { cursor: progress; }
+button[aria-disabled="true"]:hover { filter: none; }
+button { position: relative; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible,
+[tabindex="0"]:focus-visible, [tabindex="-1"]:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+a, a:visited { color: var(--accent); text-decoration: underline; text-underline-offset: .18em; }
+a:hover { text-decoration-thickness: 2px; }
+.status-area { min-height: 1.5rem; margin: 1rem 0; }
+.status { color: var(--accent); }
+.status:empty { margin: 0; }
 .status.error { color: var(--danger); }
-.manager[hidden], .pairing-result[hidden] { display: none; }
 .pairing-result { margin-top: 1.5rem; padding: 1.25rem; border: 2px solid var(--accent); border-radius: .75rem; background: #0c2118; }
-#pairing-code { display: block; margin: .6rem 0; font: 800 clamp(1.1rem, 3vw, 1.7rem) ui-monospace, monospace; letter-spacing: .06em; overflow-wrap: anywhere; }
+.pairing-code { display: block; margin: .6rem 0; font: 800 clamp(1.1rem, 3vw, 1.7rem) ui-monospace, monospace; letter-spacing: .06em; overflow-wrap: anywhere; }
+.pairing-note { color: var(--text); }
+.new-tab-note { white-space: nowrap; }
+.button-row, .dialog-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { color: var(--muted); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
+tbody th { color: var(--text); font-size: inherit; font-weight: 700; letter-spacing: normal; text-transform: none; }
+.site-key { color: var(--muted); font-weight: 400; }
+.site-url { display: block; color: var(--muted); font-size: .85rem; font-weight: 400; overflow-wrap: anywhere; }
+.site-status { font-weight: 700; white-space: nowrap; }
+.site-status.is-active { color: var(--accent); }
+.site-status.is-error { color: var(--danger); }
+.site-status.is-removed { color: var(--muted); }
+.last-check { min-width: 14rem; max-width: 28rem; overflow-wrap: anywhere; }
+.row-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.row-actions button { white-space: nowrap; }
 td code { overflow-wrap: anywhere; }
 code { color: #c8f5dd; }
+.confirm-dialog {
+  max-width: min(32rem, calc(100% - 2rem));
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--control-line);
+  border-radius: .75rem;
+  background: var(--panel);
+  color: var(--text);
+}
+.confirm-dialog::backdrop { background: rgb(0 0 0 / .72); }
+.confirm-dialog h2 { margin-top: 0; }
+.dialog-error { color: var(--danger); }
+.dialog-error:empty { margin: 0; }
 .screen-reader-text {
   position: absolute !important;
   width: 1px;
@@ -97,5 +135,10 @@ code { color: #c8f5dd; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

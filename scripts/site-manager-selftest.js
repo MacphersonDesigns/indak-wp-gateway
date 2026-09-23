@@ -63,6 +63,14 @@ async function run() {
       assert(merged.sites.legacy);
       assert(merged.sites[site.key]);
     });
+    const tombstoned = mergeRegistries(
+      { sites: { legacy: { key: 'legacy', base: 'https://legacy.example', mcpPath: '/x' } }, skipped: [] },
+      { sites: {}, skipped: [], removedKeys: ['legacy'] }
+    );
+    check('a removed paired site keeps its SITES twin from taking the route back', () => {
+      assert(!tombstoned.sites.legacy);
+      assert(tombstoned.skipped.some((entry) => entry.key === 'legacy' && /removed/.test(entry.why)));
+    });
   } finally {
     await repository.deleteSiteForTest(id).catch(() => {});
     await pool.end();

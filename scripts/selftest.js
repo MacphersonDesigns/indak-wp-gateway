@@ -68,6 +68,7 @@ function fakeWordPress(label, expectedPassword) {
     indak:        { label: 'Indak Media',            base: `http://127.0.0.1:${live.port}`,    env: 'live',    appPasswordEnv: 'WP_PW_INDAK',        writes: true,  rateLimitPerMin: 500 },
     strengthennd: { label: 'Strengthen ND (staging)', base: `http://127.0.0.1:${staging.port}`, env: 'staging', appPasswordEnv: 'WP_PW_STRENGTHENND', writes: false, rateLimitPerMin: 500 },
     nodomain:     { label: 'Not onboarded yet',      env: 'staging' },
+    'strengthen-nd': { label: 'Dash twin (live fake)', base: `http://127.0.0.1:${live.port}`, env: 'staging', appPasswordEnv: 'WP_PW_INDAK', writes: false, rateLimitPerMin: 500 },
   }, null, 2));
 
   const TOKEN = 'a'.repeat(64), RO = 'b'.repeat(64);
@@ -104,12 +105,27 @@ function fakeWordPress(label, expectedPassword) {
 
   console.log('\n== health + auth');
   const h = await (await fetch(`${base}/healthz`)).json();
-  h.ok && h.sites === 2 ? ok(`healthz -> ${JSON.stringify(h)}`) : no(`healthz -> ${JSON.stringify(h)}`);
+  h.ok && h.sites === 3 ? ok(`healthz -> ${JSON.stringify(h)}`) : no(`healthz -> ${JSON.stringify(h)}`);
   h.database === 'degraded' ? ok('database outage preserved the environment registry') : no(`database fallback -> ${JSON.stringify(h)}`);
   const un = await fetch(`${base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   un.status === 401 ? ok('no token -> 401') : no(`no token -> ${un.status}`);
   const bad = await rpc('tools/list', {}, 'c'.repeat(64));
   bad.status === 401 ? ok('wrong token -> 401') : no(`wrong token -> ${bad.status}`);
+
+  console.log('\n== malformed requests');
+  const raw = (line, host) => new Promise((resolve) => {
+    const socket = require('net').connect(PORT, '127.0.0.1', () => {
+      socket.write(`${line}\r\nHost: ${host}\r\nConnection: close\r\n\r\n`);
+    });
+    let reply = '';
+    socket.on('data', (chunk) => { reply += chunk; });
+    socket.on('close', () => resolve(reply.split('\r\n')[0]));
+    socket.on('error', () => resolve('socket error'));
+  });
+  const badPath = await raw('GET //[ HTTP/1.1', 'localhost');
+  const badHost = await raw('GET /healthz HTTP/1.1', 'example.com:99999');
+  const alive = await fetch(`${base}/healthz`).then((r) => r.status).catch(() => 0);
+  alive === 200 ? ok(`malformed path and Host do not crash the gateway (${badPath}; ${badHost})`) : no(`gateway died after malformed requests (healthz ${alive})`);
 
   console.log('\n== protocol');
   const init = JSON.parse((await rpc('initialize', { protocolVersion: '2025-06-18' })).body);
@@ -127,6 +143,11 @@ function fakeWordPress(label, expectedPassword) {
   b.includes('FAKE-STAGING') ? ok('strengthennd answered with ITS OWN identity') : no(b.slice(0, 300));
   a !== b ? ok('both sites reachable in the same run with different payloads') : no('identical payloads: routing broken');
   ok('SSE-framed upstream responses parsed');
+
+  const twin = (await call('wp_discover_abilities', { site: 'strengthen-nd' })).body;
+  twin.includes('FAKE-LIVE') ? ok('an exact key wins over its dash-stripped twin') : no(twin.slice(0, 300));
+  const ambiguous = (await call('wp_discover_abilities', { site: 'strengthen nd' })).body;
+  /could mean/.test(ambiguous) ? ok('an ambiguous site name is refused, not guessed') : no(ambiguous.slice(0, 300));
 
   console.log('\n== guardrails');
   const typo = (await call('wp_discover_abilities', { site: 'strengthend' })).body;
