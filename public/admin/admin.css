@@ -1,17 +1,50 @@
+/*
+ * Indak Bold (Indak Media Brand Kit, 2026).
+ *
+ * Two grounds, ink and white, with dome and mist as second grounds. Steel is the one accent:
+ * primary buttons, one headline word, and the healthy status mark. Tiles have 16px corners and
+ * are flat: no shadows, gradients, or borders. Form fields are the one exception and keep a
+ * thin edge, because a white field on a mist tile is otherwise invisible.
+ *
+ * The page's Content-Security-Policy allows only same-origin styles and fonts, so the fonts
+ * are served from /admin/fonts and nothing here is inline.
+ */
+@font-face {
+  font-family: "Montserrat";
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url("/admin/fonts/montserrat-800.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cabin";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("/admin/fonts/cabin-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cabin";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("/admin/fonts/cabin-700.woff2") format("woff2");
+}
+
 :root {
-  color-scheme: dark;
-  --page: #111614;
-  --panel: #19211e;
-  --panel-strong: #202c27;
-  --text: #f5f7f6;
-  --muted: #b8c5bf;
-  --line: #3b4b44;
-  --accent: #8ee0b8;
-  --accent-ink: #082117;
-  --danger: #ffb4ab;
-  /* 3.4:1 on --panel-strong and 3.9:1 on --panel, so secondary controls keep a visible edge. */
-  --control-line: #6b7f75;
-  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  color-scheme: light;
+  --ink: #0C1015;
+  --white: #FFFFFF;
+  --dome: #16202B;
+  --mist: #F2F4F7;
+  --steel: #6C8EB4;
+  --deep: #3C5A80;
+  --fog: #A7B3C2;
+  --slate: #454B55;
+  --radius: 16px;
+  --gutter: clamp(1.25rem, 5vw, 5rem);
+  --display: "Montserrat", "Arial Black", "Segoe UI", sans-serif;
+  font-family: "Cabin", "Segoe UI", system-ui, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -19,102 +52,197 @@
 [hidden] { display: none !important; }
 body {
   margin: 0;
-  background:
-    linear-gradient(90deg, transparent 0 74%, rgba(142, 224, 184, .045) 74% 75%, transparent 75%),
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 6px),
-    var(--page);
-  color: var(--text);
-  line-height: 1.5;
+  background: var(--white);
+  color: var(--slate);
+  font-size: 17px;
+  line-height: 1.7;
 }
-.shell { width: min(1080px, calc(100% - 2rem)); margin: 0 auto; padding: 3rem 0 6rem; }
-.masthead { margin-bottom: 2rem; }
-.eyebrow { color: var(--accent); font-size: .78rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+
+/* ------------------------------------------------------------------ masthead */
+.masthead { background: var(--ink); color: var(--white); overflow: hidden; }
+.masthead-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 2rem;
+  padding: 2rem 0 0 var(--gutter);
+}
+.masthead-copy { flex: 999 1 26rem; min-width: 0; padding: 0 1.25rem 3rem 0; }
+.masthead-art { flex: 1 1 20rem; display: flex; justify-content: flex-end; margin-right: -3.5rem; }
+.wordmark { display: block; width: auto; height: 1.75rem; margin-bottom: 2.5rem; }
+.motif { display: block; flex: none; }
+.eyebrow {
+  margin: 0;
+  color: var(--fog);
+  font-family: var(--display);
+  font-size: .8rem;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+h1, h2, h3 {
+  color: var(--ink);
+  font-family: var(--display);
+  font-weight: 800;
+  text-transform: uppercase;
+}
 h1 {
-  max-width: 14ch;
-  margin: .2rem 0 .8rem;
-  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  font-size: clamp(2.6rem, 7vw, 5.4rem);
-  font-weight: 500;
-  line-height: .9;
-  letter-spacing: -.055em;
+  max-width: 16ch;
+  margin: .9rem 0 1.1rem;
+  color: var(--white);
+  font-size: clamp(2.5rem, 5.4vw, 4.75rem);
+  line-height: .98;
+  letter-spacing: -.02em;
 }
-h2, h3 { line-height: 1.15; }
-.lede, .hint, .empty { color: var(--muted); }
+.hot { color: var(--steel); }
+h2 { margin: 0 0 1rem; font-size: clamp(1.4rem, 2.4vw, 2rem); line-height: 1.05; letter-spacing: -.01em; }
+h3 { margin: 0 0 .75rem; font-size: 1.1rem; line-height: 1.2; }
+.lede { max-width: 52ch; margin: 0; color: var(--fog); }
+
+/* --------------------------------------------------------------------- shell */
+.shell { padding: 3rem var(--gutter) 5rem; }
+.hint, .empty { color: var(--slate); }
+.hint { margin: 0; font-size: .94rem; line-height: 1.5; }
 .panel {
-  position: relative;
-  margin-top: 1rem;
+  margin-top: 1.5rem;
   padding: clamp(1.25rem, 3vw, 2rem);
-  border: 1px solid var(--line);
-  border-radius: .25rem 1.5rem .25rem .25rem;
-  background: linear-gradient(135deg, var(--panel-strong), var(--panel) 42%);
-  box-shadow: 0 1.2rem 3rem rgba(0, 0, 0, .18);
+  border-radius: var(--radius);
+  background: var(--mist);
 }
-.panel::before {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: .25rem;
-  background: var(--accent);
-  content: "";
-}
-.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.field, .field-row { display: grid; gap: .45rem; }
+.shell > .panel:first-child { margin-top: 0; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; }
+.field, .field-row { display: grid; gap: .45rem; align-content: start; }
 .field.full { grid-column: 1 / -1; }
-.field-row { grid-template-columns: minmax(12rem, 1fr) auto; align-items: end; }
+.field-row { grid-template-columns: minmax(12rem, 1fr) auto; align-items: end; max-width: 46rem; }
 .field-row label, .field-row .hint { grid-column: 1 / -1; }
-label { font-weight: 700; }
-input, select, button { min-height: 2.8rem; border-radius: .5rem; font: inherit; }
-input, select { width: 100%; border: 1px solid #60736a; background: #0d1210; color: var(--text); padding: .65rem .75rem; }
-input[type="checkbox"] { width: 1.2rem; min-height: 1.2rem; accent-color: var(--accent); }
+label { color: var(--ink); font-weight: 700; }
+
+/* ------------------------------------------------------------------ controls */
+input, select, button { min-height: 2.75rem; font: inherit; }
+input, select {
+  width: 100%;
+  border: 1px solid var(--slate);
+  border-radius: .75rem;
+  background: var(--white);
+  color: var(--ink);
+  padding: .55rem .85rem;
+}
+input[type="checkbox"] { width: 1.3rem; min-height: 1.3rem; height: 1.3rem; padding: 0; vertical-align: -.25rem; accent-color: var(--ink); }
 .checkbox-field { align-content: center; }
-button { border: 0; background: var(--accent); color: var(--accent-ink); padding: .6rem 1rem; font-weight: 800; cursor: pointer; }
-button.secondary { border: 1px solid var(--control-line); background: var(--panel-strong); color: var(--text); }
-button.danger { border: 1px solid var(--danger); background: transparent; color: var(--danger); }
-button.danger-solid { background: var(--danger); color: var(--page); }
-button:hover { filter: brightness(1.08); }
-button[aria-disabled="true"] { cursor: progress; }
-button[aria-disabled="true"]:hover { filter: none; }
-button { position: relative; }
+#pairing-form > button { margin-top: 1.5rem; }
+
+button {
+  position: relative;
+  border: 0;
+  border-radius: 999px;
+  background: var(--steel);
+  color: var(--ink);
+  padding: .5rem 1.4rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
+button.secondary { background: var(--white); color: var(--ink); }
+/* Remove is the heaviest control in a row; the confirm dialog guards it. */
+button.danger, button.danger-solid { background: var(--ink); color: var(--white); }
+.pairing-result button.secondary { background: var(--dome); color: var(--white); }
+.confirm-dialog button.secondary { background: var(--mist); }
+button:hover { background: var(--deep); color: var(--white); }
+button.secondary:hover, .confirm-dialog button.secondary:hover { background: var(--ink); color: var(--white); }
+button.danger:hover, button.danger-solid:hover { background: var(--deep); }
+.pairing-result button.secondary:hover { background: var(--white); color: var(--ink); }
+button[aria-disabled="true"] { cursor: progress; opacity: .75; }
+button[aria-disabled="true"]:hover { background: var(--steel); color: var(--ink); }
+button.secondary[aria-disabled="true"]:hover { background: var(--white); color: var(--ink); }
+button.danger[aria-disabled="true"]:hover, button.danger-solid[aria-disabled="true"]:hover { background: var(--ink); color: var(--white); }
+
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible,
-[tabindex="0"]:focus-visible, [tabindex="-1"]:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
-a, a:visited { color: var(--accent); text-decoration: underline; text-underline-offset: .18em; }
-a:hover { text-decoration-thickness: 2px; }
-.status-area { min-height: 1.5rem; margin: 1rem 0; }
-.status { color: var(--accent); }
-.status:empty { margin: 0; }
-.status.error { color: var(--danger); }
-.pairing-result { margin-top: 1.5rem; padding: 1.25rem; border: 2px solid var(--accent); border-radius: .75rem; background: #0c2118; }
-.pairing-code { display: block; margin: .6rem 0; font: 800 clamp(1.1rem, 3vw, 1.7rem) ui-monospace, monospace; letter-spacing: .06em; overflow-wrap: anywhere; }
-.pairing-note { color: var(--text); }
-.new-tab-note { white-space: nowrap; }
+[tabindex="0"]:focus-visible, [tabindex="-1"]:focus-visible { outline: 3px solid var(--deep); outline-offset: 3px; }
+.pairing-result :focus-visible { outline-color: var(--white); }
+
+a, a:visited { color: var(--deep); font-weight: 700; text-decoration: underline; text-underline-offset: .18em; }
+a:hover { color: var(--ink); text-decoration-thickness: 2px; }
+code { color: var(--ink); font-size: .92em; }
+
+/* -------------------------------------------------------------------- status */
+.status-area { min-height: 1.5rem; margin: 1.5rem 0; display: grid; gap: .5rem; }
+.status, .status.error { padding: .8rem 1.25rem; border-radius: var(--radius); font-weight: 700; }
+.status { background: var(--mist); color: var(--deep); }
+/* Told apart from a routine message by ground and weight, not by hue. */
+.status.error { background: var(--ink); color: var(--white); }
+.status:empty { margin: 0; padding: 0; }
+
+/* ------------------------------------------------------------ pairing result */
+.pairing-result { margin-top: 1.5rem; padding: clamp(1.25rem, 3vw, 2rem); border-radius: var(--radius); background: var(--ink); color: var(--fog); }
+.pairing-result h3 { color: var(--white); }
+.pairing-result p { margin: .6rem 0; }
+.pairing-result a, .pairing-result a:visited { color: var(--white); }
+.pairing-code {
+  display: block;
+  margin: .6rem 0;
+  color: var(--steel);
+  font: 800 clamp(1.5rem, 3.4vw, 2.25rem) ui-monospace, "SFMono-Regular", Menlo, monospace;
+  letter-spacing: .06em;
+  overflow-wrap: anywhere;
+}
+.pairing-note { color: var(--white); }
+.new-tab-note { white-space: nowrap; font-weight: 400; }
 .button-row, .dialog-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.button-row { margin-top: 1.25rem; }
+
+/* --------------------------------------------------------------- sites table */
+.manager > .panel:last-of-type { background: transparent; padding: 0; margin-top: 3.5rem; }
+.section-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .5rem; }
+.section-heading h2 { margin: 0; }
+.section-heading button.secondary { background: var(--mist); }
+.section-heading button.secondary:hover { background: var(--ink); }
 .table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: .8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-th { color: var(--muted); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
-tbody th { color: var(--text); font-size: inherit; font-weight: 700; letter-spacing: normal; text-transform: none; }
-.site-key { color: var(--muted); font-weight: 400; }
-.site-url { display: block; color: var(--muted); font-size: .85rem; font-weight: 400; overflow-wrap: anywhere; }
-.site-status { font-weight: 700; white-space: nowrap; }
-.site-status.is-active { color: var(--accent); }
-.site-status.is-error { color: var(--danger); }
-.site-status.is-removed { color: var(--muted); }
-.last-check { min-width: 14rem; max-width: 28rem; overflow-wrap: anywhere; }
-.row-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.row-actions button { white-space: nowrap; }
+/* Each row is its own mist tile. */
+table { width: 100%; min-width: 68rem; border-collapse: separate; border-spacing: 0 .5rem; }
+th, td { padding: .9rem 1rem; text-align: left; vertical-align: middle; }
+thead th {
+  padding-bottom: .1rem;
+  color: var(--slate);
+  font-family: var(--display);
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+tbody th, tbody td { background: var(--mist); }
+tbody th { min-width: 15rem; color: var(--ink); font-size: 1.05rem; font-weight: 700; }
+tbody tr > :first-child { padding-left: 1.5rem; border-radius: var(--radius) 0 0 var(--radius); }
+tbody tr > :last-child { padding-right: 1.5rem; border-radius: 0 var(--radius) var(--radius) 0; }
+.site-key { color: var(--slate); font-size: .94rem; font-weight: 400; }
+.site-url { display: block; color: var(--slate); font-size: .94rem; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+.site-status { display: inline-flex; align-items: center; gap: .6rem; color: var(--ink); font-weight: 700; white-space: nowrap; }
+/*
+ * The script writes a text glyph here; the brand shapes replace it. Circle: active.
+ * Door: error. Ring: removed. The word beside the mark always says the same thing.
+ */
+.status-glyph { flex: none; width: 1rem; height: 1rem; overflow: hidden; font-size: 0; line-height: 0; }
+.site-status.is-active .status-glyph { border-radius: 50%; background: var(--steel); }
+.site-status.is-error .status-glyph { border-radius: .5rem .5rem 0 0; background: var(--ink); }
+.site-status.is-removed .status-glyph { border: .28rem solid var(--slate); border-radius: 50%; }
+.site-status.is-removed { color: var(--slate); }
+.last-check { min-width: 14rem; max-width: 28rem; font-size: .94rem; line-height: 1.45; overflow-wrap: anywhere; }
+.row-actions { display: flex; gap: .5rem; }
+.row-actions button { white-space: nowrap; padding-inline: 1.1rem; }
 td code { overflow-wrap: anywhere; }
-code { color: #c8f5dd; }
+.empty { padding: 1.25rem 1.5rem; border-radius: var(--radius); background: var(--mist); }
+
+/* -------------------------------------------------------------------- dialog */
 .confirm-dialog {
   max-width: min(32rem, calc(100% - 2rem));
   padding: clamp(1.25rem, 3vw, 2rem);
-  border: 1px solid var(--control-line);
-  border-radius: .75rem;
-  background: var(--panel);
-  color: var(--text);
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--white);
+  color: var(--slate);
 }
-.confirm-dialog::backdrop { background: rgb(0 0 0 / .72); }
+.confirm-dialog::backdrop { background: rgb(12 16 21 / .72); }
 .confirm-dialog h2 { margin-top: 0; }
-.dialog-error { color: var(--danger); }
+.dialog-error { color: var(--ink); font-weight: 700; }
 .dialog-error:empty { margin: 0; }
 .screen-reader-text {
   position: absolute !important;
@@ -131,7 +259,8 @@ code { color: #c8f5dd; }
 @media (max-width: 700px) {
   .grid, .field-row { grid-template-columns: 1fr; }
   .field.full, .field-row label, .field-row .hint { grid-column: 1; }
-  .shell { padding-top: 1.5rem; }
+  .masthead-art { display: none; }
+  .masthead-copy { padding-bottom: 2rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -107,6 +107,21 @@ function fakeWordPress(label, expectedPassword) {
   const h = await (await fetch(`${base}/healthz`)).json();
   h.ok && h.sites === 3 ? ok(`healthz -> ${JSON.stringify(h)}`) : no(`healthz -> ${JSON.stringify(h)}`);
   h.database === 'degraded' ? ok('database outage preserved the environment registry') : no(`database fallback -> ${JSON.stringify(h)}`);
+  const adminPage = await fetch(`${base}/admin`);
+  const csp = adminPage.headers.get('content-security-policy') || '';
+  adminPage.status === 200 && /default-src 'self'/.test(csp) && /style-src 'self'(;|$)/.test(csp) && !/https?:/.test(csp)
+    ? ok('Site Manager page is served with a same-origin-only policy') : no(`/admin -> ${adminPage.status}, CSP: ${csp}`);
+  const adminHtml = await adminPage.text();
+  !/\sstyle=|<style|https?:\/\/fonts\./i.test(adminHtml)
+    ? ok('Site Manager page has no inline styles or third-party fonts for that policy to block') : no('Site Manager page would be blocked by its own policy');
+  for (const font of ['montserrat-800', 'cabin-400', 'cabin-700']) {
+    const res = await fetch(`${base}/admin/fonts/${font}.woff2`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    res.status === 200 && res.headers.get('content-type') === 'font/woff2' && bytes.subarray(0, 4).toString('latin1') === 'wOF2'
+      ? ok(`Site Manager font ${font} is served from this origin`) : no(`font ${font} -> ${res.status} ${res.headers.get('content-type')}`);
+  }
+  const strayAsset = await fetch(`${base}/admin/fonts/OFL.txt`);
+  strayAsset.status !== 200 ? ok('only the listed Site Manager assets are served') : no('an unlisted file under /admin was served');
   const un = await fetch(`${base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   un.status === 401 ? ok('no token -> 401') : no(`no token -> ${un.status}`);
   const bad = await rpc('tools/list', {}, 'c'.repeat(64));

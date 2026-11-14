@@ -619,14 +619,18 @@ async function handleRequest(req, res) {
     '/admin/': ['index.html', 'text/html; charset=utf-8'],
     '/admin/admin.css': ['admin.css', 'text/css; charset=utf-8'],
     '/admin/admin.js': ['admin.js', 'text/javascript; charset=utf-8'],
+    // Self-hosted so the policy below can keep fonts and styles to this origin.
+    '/admin/fonts/montserrat-800.woff2': ['fonts/montserrat-800.woff2', 'font/woff2', 'public, max-age=604800'],
+    '/admin/fonts/cabin-400.woff2': ['fonts/cabin-400.woff2', 'font/woff2', 'public, max-age=604800'],
+    '/admin/fonts/cabin-700.woff2': ['fonts/cabin-700.woff2', 'font/woff2', 'public, max-age=604800'],
   };
   if (req.method === 'GET' && adminAssets[url.pathname]) {
-    const [file, contentType] = adminAssets[url.pathname];
+    const [file, contentType, cacheControl = 'no-store'] = adminAssets[url.pathname];
     const body = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin', file));
     res.writeHead(200, {
       'content-type': contentType,
       'content-length': body.length,
-      'cache-control': 'no-store',
+      'cache-control': cacheControl,
       'content-security-policy': "default-src 'self'; connect-src 'self'; style-src 'self'; script-src 'self'; img-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'no-referrer',

@@ -2,6 +2,19 @@
 
 All notable changes to the Indak WP Gateway are documented here.
 
+## Unreleased
+
+### Changed
+
+- **The Site Manager uses the Indak Media brand (Indak Bold, 2026 Brand Kit).** Ink masthead
+  with the wordmark and shape motif, mist tiles, pill buttons, Montserrat headlines and Cabin
+  body text. Status is shown with the brand shapes plus a word (circle: Active, door: Error,
+  ring: Removed), never by color alone. Nothing about pairing, testing, or removing a site
+  changed, and `admin.js` is untouched.
+- The fonts are served from `/admin/fonts/` so the page's Content-Security-Policy stays
+  same-origin only. They are Montserrat and Cabin under the SIL Open Font License
+  (`public/admin/fonts/OFL.txt`).
+
 ## 1.2.0 and connector 0.2.0 - 2026-09-22
 
 Connections no longer drop, and no connection problem needs a database edit to fix.
